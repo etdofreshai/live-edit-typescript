@@ -34,16 +34,22 @@ function savePersistedState(state: PersistedState) {
 
 const api = (path: string, opts?: RequestInit) => fetch(path, opts).then(r => r.json());
 
-function IframeWithRetry({ port }: { port: number }) {
+function IframeWithRetry({ port, cacheId }: { port: number; cacheId?: string }) {
   const [ready, setReady] = useState(false);
   const [retryCount, setRetryCount] = useState(0);
-  const maxRetries = 30; // up to 60s
+  const [serverLog, setServerLog] = useState('');
+  const [showLog, setShowLog] = useState(false);
+  const [cancelled, setCancelled] = useState(false);
+  const [timedOut, setTimedOut] = useState(false);
+  const maxRetries = 30;
   const cancelledRef = useRef(false);
 
   useEffect(() => {
     setReady(false);
     setRetryCount(0);
     setCancelled(false);
+    setTimedOut(false);
+    setServerLog('');
     cancelledRef.current = false;
 
     const poll = async () => {
@@ -56,26 +62,64 @@ function IframeWithRetry({ port }: { port: number }) {
             return;
           }
         } catch {}
-        if (!cancelledRef.current) setRetryCount(i + 1);
+        if (!cancelledRef.current) {
+          setRetryCount(i + 1);
+          // Fetch server log every 5 attempts
+          if (cacheId && (i + 1) % 3 === 0) {
+            try {
+              const data = await fetch(`/api/cache/${cacheId}/log`).then(r => r.json());
+              if (data.log) setServerLog(data.log);
+            } catch {}
+          }
+        }
         await new Promise(r => setTimeout(r, 2000));
+      }
+      if (!cancelledRef.current) {
+        setTimedOut(true);
+        // Fetch final log
+        if (cacheId) {
+          try {
+            const data = await fetch(`/api/cache/${cacheId}/log`).then(r => r.json());
+            if (data.log) setServerLog(data.log);
+          } catch {}
+        }
       }
     };
     poll();
     return () => { cancelledRef.current = true; };
-  }, [port]);
-
-  const [cancelled, setCancelled] = useState(false);
+  }, [port, cacheId]);
 
   if (!ready) {
     return (
-      <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', height: '100%', color: '#6b7280', gap: 12 }}>
+      <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', height: '100%', color: '#6b7280', gap: 12, padding: 20 }}>
         {cancelled ? (
           <div>Cancelled</div>
+        ) : timedOut ? (
+          <>
+            <div style={{ color: '#f38ba8', fontSize: 16 }}>⚠ Server failed to start</div>
+            {serverLog && (
+              <pre style={{ maxWidth: '90%', maxHeight: 300, overflow: 'auto', background: '#16161e', color: '#cdd6f4', padding: 12, borderRadius: 6, fontSize: 12, fontFamily: 'monospace', whiteSpace: 'pre-wrap', textAlign: 'left', width: '100%' }}>
+                {serverLog}
+              </pre>
+            )}
+          </>
         ) : (
           <>
             <div className="spinner" />
             <div>Waiting for server on port {port}… {retryCount > 0 ? `(attempt ${retryCount}/${maxRetries})` : ''}</div>
-            <button onClick={() => { setCancelled(true); cancelledRef.current = true; }} style={{ marginTop: 8, padding: '4px 16px', background: 'transparent', border: '1px solid #555', borderRadius: 6, color: '#999', cursor: 'pointer', fontSize: 13 }}>Cancel</button>
+            <div style={{ display: 'flex', gap: 8 }}>
+              <button onClick={() => { setCancelled(true); cancelledRef.current = true; }} style={{ padding: '4px 16px', background: 'transparent', border: '1px solid #555', borderRadius: 6, color: '#999', cursor: 'pointer', fontSize: 13 }}>Cancel</button>
+              {cacheId && (
+                <button onClick={async () => { setShowLog(!showLog); if (!showLog && cacheId) { try { const d = await fetch(`/api/cache/${cacheId}/log`).then(r => r.json()); if (d.log) setServerLog(d.log); } catch {} } }} style={{ padding: '4px 16px', background: 'transparent', border: '1px solid #555', borderRadius: 6, color: '#999', cursor: 'pointer', fontSize: 13 }}>
+                  {showLog ? 'Hide Log' : 'Show Log'}
+                </button>
+              )}
+            </div>
+            {showLog && serverLog && (
+              <pre style={{ maxWidth: '90%', maxHeight: 200, overflow: 'auto', background: '#16161e', color: '#cdd6f4', padding: 12, borderRadius: 6, fontSize: 12, fontFamily: 'monospace', whiteSpace: 'pre-wrap', textAlign: 'left', width: '100%' }}>
+                {serverLog}
+              </pre>
+            )}
           </>
         )}
       </div>
@@ -493,7 +537,7 @@ export default function App() {
             </div>
           )}
           {previewPort ? (
-            <IframeWithRetry key={`${activeEntryId}-${previewPort}`} port={previewPort} />
+            <IframeWithRetry key={`${activeEntryId}-${previewPort}`} port={previewPort} cacheId={activeEntryId || undefined} />
           ) : null}
           {previewPort && (
             <div className="preview-fallback" style={{ display: 'none', alignItems: 'center', justifyContent: 'center', height: '100%', color: '#6c7086', fontSize: 14, flexDirection: 'column', gap: 8, position: 'absolute', inset: 0 }}>

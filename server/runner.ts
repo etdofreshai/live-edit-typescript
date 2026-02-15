@@ -1,5 +1,5 @@
 import { execSync, spawn } from 'child_process';
-import { existsSync, rmSync } from 'fs';
+import { existsSync, rmSync, createWriteStream, readFileSync } from 'fs';
 import path from 'path';
 import type { CacheEntry } from './cache-manager.js';
 import { OWNER } from './github.js';
@@ -37,13 +37,21 @@ export async function cloneAndStart(repo: string, sha: string, port: number, opt
   // Start vite with --base flag; project's own vite.config is preserved
   const args = ['vite', '--port', String(port), '--host', '0.0.0.0', '--strictPort', '--base', `/proxy/${port}/`];
 
+  // Capture stdout/stderr to a log file for debugging
+  const logPath = path.join(dir, '.vite-server.log');
+  const logStream = createWriteStream(logPath, { flags: 'w' });
+
   const child = spawn('npx', args, {
     cwd: dir,
-    stdio: 'ignore',
+    stdio: ['ignore', logStream, logStream],
     detached: true,
     env: { ...process.env, PORT: String(port) },
   });
   child.unref();
+  child.on('exit', (code) => {
+    logStream.write(`\n[process exited with code ${code}]\n`);
+    logStream.end();
+  });
 
   await new Promise(r => setTimeout(r, 3000));
 
@@ -67,6 +75,15 @@ export async function stopServer(entry: CacheEntry) {
     } catch {
       try { process.kill(entry.pid, 'SIGTERM'); } catch {}
     }
+  }
+}
+
+export function getServerLog(dir: string): string {
+  const logPath = path.join(dir, '.vite-server.log');
+  try {
+    return readFileSync(logPath, 'utf-8');
+  } catch {
+    return '';
   }
 }
 

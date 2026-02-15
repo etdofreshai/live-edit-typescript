@@ -6,7 +6,7 @@ import fs from 'fs';
 import pathModule from 'path';
 import { listRepos, listBranches, listCommits, getBranchHead, getCommit, createBranch, getDefaultBranch, compareBranches, createPullRequest, OWNER } from './github.js';
 import { getEntry, addEntry, evictIfNeeded, allocatePort, removeEntry, listEntries, makeId, getEntryByPort, getLatestEntries, updateEntry, getEntryById } from './cache-manager.js';
-import { cloneAndStart, getTargetDir, pullLatest } from './runner.js';
+import { cloneAndStart, getTargetDir, pullLatest, getServerLog } from './runner.js';
 import { webhookRouter, registerWebhook, unregisterWebhook } from './webhook.js';
 
 const app = express();
@@ -168,6 +168,13 @@ app.post('/api/run-latest', async (req, res) => {
   } catch (e: any) {
     res.status(500).json({ error: e.message });
   }
+});
+
+app.get('/api/cache/:id/log', (req, res) => {
+  const entry = getEntryById(req.params.id);
+  if (!entry) return res.status(404).json({ error: 'Entry not found' });
+  const log = getServerLog(entry.dir);
+  res.json({ log });
 });
 
 app.delete('/api/cache/:id', async (req, res) => {
