@@ -279,10 +279,31 @@ export default function App() {
             </div>
           )}
           {previewPort ? (
-            <iframe src={`/proxy/${previewPort}/`} />
-          ) : activeEntry?.type === 'static' ? (
+            <iframe
+              src={`/proxy/${previewPort}/`}
+              onError={() => {}}
+              style={{ background: '#1a1a2e' }}
+              onLoad={e => {
+                try {
+                  const doc = (e.target as HTMLIFrameElement).contentDocument;
+                  if (doc && doc.title && /502|503|504|Bad Gateway/i.test(doc.title)) {
+                    (e.target as HTMLIFrameElement).style.display = 'none';
+                    const sib = (e.target as HTMLIFrameElement).parentElement?.querySelector('.preview-fallback') as HTMLElement;
+                    if (sib) sib.style.display = 'flex';
+                  }
+                } catch (_) { /* cross-origin, that's fine */ }
+              }}
+            />
+          ) : null}
+          {previewPort && (
+            <div className="preview-fallback" style={{ display: 'none', alignItems: 'center', justifyContent: 'center', height: '100%', color: '#6c7086', fontSize: 14, flexDirection: 'column', gap: 8, position: 'absolute', inset: 0 }}>
+              <span style={{ fontSize: 28 }}>⚠️</span>
+              <span>Server not available — try running the entry again</span>
+            </div>
+          )}
+          {!previewPort && activeEntry?.type === 'static' ? (
             <div style={{ display: 'flex', height: '100%' }}>
-              <div style={{ width: 260, borderRight: '1px solid #ddd', overflow: 'auto', fontSize: 13, flexShrink: 0 }}>
+              <div style={{ width: 260, borderRight: '1px solid #2a2a3e', overflow: 'auto', fontSize: 13, flexShrink: 0, background: '#1a1a2e' }}>
                 {(() => {
                   const renderItems = (parentPath: string, depth: number): React.ReactNode[] => {
                     const items = files
@@ -310,10 +331,11 @@ export default function App() {
                             }
                             style={{
                               padding: '3px 8px', paddingLeft: 8 + depth * 16, cursor: 'pointer',
-                              background: isSelected ? '#e0e7ff' : 'transparent',
+                              background: isSelected ? 'rgba(137, 180, 250, 0.15)' : 'transparent',
+                              color: isSelected ? '#89b4fa' : '#cdd6f4',
                               whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
                             }}
-                            onMouseEnter={e => { if (!isSelected) e.currentTarget.style.background = '#f3f4f6'; }}
+                            onMouseEnter={e => { if (!isSelected) e.currentTarget.style.background = 'rgba(255,255,255,0.05)'; }}
                             onMouseLeave={e => { if (!isSelected) e.currentTarget.style.background = 'transparent'; }}
                           >
                             <span style={{ marginRight: 4 }}>{isDir ? (expanded ? '📂' : '📁') : '📄'}</span>
@@ -327,29 +349,29 @@ export default function App() {
                   return renderItems('', 0);
                 })()}
               </div>
-              <div style={{ flex: 1, overflow: 'auto', display: 'flex', flexDirection: 'column' }}>
+              <div style={{ flex: 1, overflow: 'auto', display: 'flex', flexDirection: 'column', background: '#16161e' }}>
                 {currentFile ? (
                   <>
-                    <div style={{ padding: '6px 12px', borderBottom: '1px solid #eee', fontSize: 12, color: '#666', background: '#fafafa' }}>
+                    <div style={{ padding: '6px 12px', borderBottom: '1px solid #2a2a3e', fontSize: 12, color: '#8888aa', background: '#1a1a2e' }}>
                       {currentFile.path.split('/').map((part, i, arr) => (
                         <span key={i}>
-                          {i > 0 && <span style={{ margin: '0 2px', color: '#ccc' }}>/</span>}
-                          <span style={{ color: i === arr.length - 1 ? '#111' : '#666' }}>{part}</span>
+                          {i > 0 && <span style={{ margin: '0 2px', color: '#555' }}>/</span>}
+                          <span style={{ color: i === arr.length - 1 ? '#e0e0e0' : '#8888aa' }}>{part}</span>
                         </span>
                       ))}
                     </div>
                     {currentFile.binary ? (
-                      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', flex: 1, color: '#999' }}>
+                      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', flex: 1, color: '#6b7280' }}>
                         Binary file — cannot preview
                       </div>
                     ) : (
-                      <pre style={{ margin: 0, padding: 12, fontSize: 13, fontFamily: 'ui-monospace, monospace', overflow: 'auto', flex: 1, background: '#fafafa', lineHeight: 1.5 }}>
+                      <pre style={{ margin: 0, padding: 12, fontSize: 13, fontFamily: 'ui-monospace, monospace', overflow: 'auto', flex: 1, background: '#16161e', color: '#cdd6f4', lineHeight: 1.5 }}>
                         {currentFile.content}
                       </pre>
                     )}
                   </>
                 ) : (
-                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', flex: 1, color: '#999' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', flex: 1, color: '#6b7280' }}>
                     Select a file to view
                   </div>
                 )}
