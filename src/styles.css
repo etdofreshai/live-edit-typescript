@@ -251,19 +251,10 @@ body {
   box-shadow: 0 6px 16px rgba(0, 0, 0, 0.4);
 }
 
-.voice-btn:disabled {
-  cursor: not-allowed;
-  opacity: 0.7;
-}
-
 /* Recording state - pulsing red glow */
 @keyframes pulse-red {
-  0%, 100% {
-    box-shadow: 0 0 0 0 rgba(243, 139, 168, 0.7);
-  }
-  50% {
-    box-shadow: 0 0 0 12px rgba(243, 139, 168, 0);
-  }
+  0%, 100% { box-shadow: 0 0 0 0 rgba(243, 139, 168, 0.7); }
+  50% { box-shadow: 0 0 0 12px rgba(243, 139, 168, 0); }
 }
 
 .voice-btn.recording {
@@ -272,19 +263,23 @@ body {
   animation: pulse-red 1.5s ease-in-out infinite;
 }
 
-/* Processing state - spinner */
-.voice-btn.processing svg .spinner-path {
-  animation: spin 1s linear infinite;
-  transform-origin: center;
-}
-
-/* Transcript popup */
-.voice-transcript {
+/* Message queue */
+.voice-queue {
   position: fixed;
   bottom: 80px;
   right: 20px;
-  max-width: 300px;
-  padding: 12px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  z-index: 999;
+  max-width: 320px;
+}
+
+.voice-msg {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
   background: var(--bg-surface);
   border: 1px solid var(--border);
   border-radius: var(--radius-lg);
@@ -292,23 +287,25 @@ body {
   font-size: 13px;
   line-height: 1.4;
   box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
-  z-index: 999;
   animation: fadeIn 0.2s ease;
 }
 
-.voice-transcript.fading {
-  animation: fadeOut 1.8s ease forwards;
+.voice-msg.sent { animation: fadeIn 0.2s ease, voiceFadeOut 2s ease 0.5s forwards; }
+.voice-msg.error { border-color: var(--danger); }
+
+.voice-msg-icon { flex-shrink: 0; width: 18px; height: 18px; display: flex; align-items: center; justify-content: center; }
+.voice-msg-text { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+
+.voice-spinner {
+  width: 14px; height: 14px; display: inline-block;
+  border: 2px solid var(--border); border-top-color: var(--accent);
+  border-radius: 50%; animation: spin 0.6s linear infinite;
 }
 
-/* Done state - green glow */
-.voice-btn.done {
-  background: var(--accent-green-dim);
-  color: var(--accent-green);
-  opacity: 1;
-}
+.voice-check { color: var(--accent-green); font-weight: 700; font-size: 15px; }
+.voice-error-icon { color: var(--danger); font-weight: 700; font-size: 15px; }
 
-@keyframes fadeOut {
+@keyframes voiceFadeOut {
   0% { opacity: 1; transform: translateY(0); }
-  70% { opacity: 1; transform: translateY(0); }
   100% { opacity: 0; transform: translateY(10px); }
 }
