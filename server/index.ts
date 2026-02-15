@@ -75,7 +75,7 @@ app.post('/api/run', async (req, res) => {
       id: makeId(repo, sha),
       repo,
       sha,
-      port,
+      port: type === 'static' ? 0 : port,
       dir,
       lastAccessed: Date.now(),
       pid,

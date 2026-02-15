@@ -134,9 +134,8 @@ export default function App() {
                 });
               }
               if (entry && !entry.error) {
-                setActiveEntryId(entry.id);
-                setPreviewPort(entry.port || null);
                 setCache(await api('/api/cache'));
+                await showEntry(entry);
               } else {
                 setActiveEntryId(null);
                 setPreviewPort(null);
@@ -180,10 +179,8 @@ export default function App() {
         body: JSON.stringify({ repo: selectedRepo, sha }),
       });
       if (entry.error) { setError(entry.error); return; }
-      setPreviewPort(entry.port || null);
-      setActiveEntryId(entry.id);
-      setSidebarOpen(false);
-      refreshCache();
+      await refreshCache();
+      await showEntry(entry);
     } catch (e: any) { setError(e.message); }
     finally { setLoading(''); }
   };
@@ -196,10 +193,8 @@ export default function App() {
         body: JSON.stringify({ repo: selectedRepo, branch: selectedBranch }),
       });
       if (entry.error) { setError(entry.error); return; }
-      setPreviewPort(entry.port || null); setActiveEntryId(entry.id);
-      setActiveEntryId(entry.id);
-      setSidebarOpen(false);
-      refreshCache();
+      await refreshCache();
+      await showEntry(entry);
     } catch (e: any) { setError(e.message); }
     finally { setLoading(''); }
   };
