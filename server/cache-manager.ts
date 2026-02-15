@@ -68,4 +68,11 @@ export function listEntries(): CacheEntry[] {
   return [...cache.values()].sort((a, b) => b.lastAccessed - a.lastAccessed);
 }
 
+export function getEntryByPort(port: number): CacheEntry | undefined {
+  for (const e of cache.values()) {
+    if (e.port === port) return e;
+  }
+  return undefined;
+}
+
 export { makeId };

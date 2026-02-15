@@ -1,7 +1,8 @@
 import express from 'express';
 import cors from 'cors';
+import { createProxyMiddleware } from 'http-proxy-middleware';
 import { listRepos, listBranches, listCommits } from './github.js';
-import { getEntry, addEntry, evictIfNeeded, allocatePort, removeEntry, listEntries, makeId } from './cache-manager.js';
+import { getEntry, addEntry, evictIfNeeded, allocatePort, removeEntry, listEntries, makeId, getEntryByPort } from './cache-manager.js';
 import { cloneAndStart, getTargetDir } from './runner.js';
 
 const app = express();
@@ -74,4 +75,36 @@ app.delete('/api/cache/:id', async (req, res) => {
   res.json({ ok });
 });
 
-app.listen(3000, () => console.log('API server on :3000'));
+// Proxy requests to target dev servers: /proxy/:port/...
+app.use('/proxy/:port', (req, res, next) => {
+  const port = parseInt(req.params.port);
+  if (!port || !getEntryByPort(port)) {
+    return res.status(404).json({ error: 'No server on that port' });
+  }
+  const proxy = createProxyMiddleware({
+    target: `http://localhost:${port}`,
+    changeOrigin: true,
+    pathRewrite: { [`^/proxy/${port}`]: '' },
+    ws: true,
+  });
+  proxy(req, res, next);
+});
+
+const server = app.listen(3000, () => console.log('API server on :3000'));
+
+// Handle WebSocket upgrades for proxy
+server.on('upgrade', (req, socket, head) => {
+  const match = req.url?.match(/^\/proxy\/(\d+)(\/.*)?$/);
+  if (match) {
+    const port = parseInt(match[1]);
+    if (getEntryByPort(port)) {
+      const proxy = createProxyMiddleware({
+        target: `http://localhost:${port}`,
+        changeOrigin: true,
+        pathRewrite: { [`^/proxy/${port}`]: '' },
+        ws: true,
+      });
+      proxy.upgrade?.(req, socket, head);
+    }
+  }
+});

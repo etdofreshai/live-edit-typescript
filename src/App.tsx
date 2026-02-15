@@ -113,7 +113,7 @@ export default function App() {
 
       <div style={{ flex: 1, border: '1px solid #ddd', borderRadius: 4, overflow: 'hidden' }}>
         {previewPort ? (
-          <iframe src={`http://localhost:${previewPort}`} style={{ width: '100%', height: '100%', border: 'none' }} />
+          <iframe src={`/proxy/${previewPort}/`} style={{ width: '100%', height: '100%', border: 'none' }} />
         ) : (
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%', color: '#999' }}>
             Select a commit and click Run to preview
