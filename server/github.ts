@@ -24,4 +24,9 @@ export async function listCommits(repo: string, branch: string) {
   return ghFetch(`/repos/${OWNER}/${repo}/commits?sha=${encodeURIComponent(branch)}&per_page=30`);
 }
 
+export async function getBranchHead(repo: string, branch: string): Promise<string> {
+  const data = await ghFetch(`/repos/${OWNER}/${repo}/branches/${encodeURIComponent(branch)}`);
+  return data.commit.sha;
+}
+
 export { OWNER };

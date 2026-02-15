@@ -10,26 +10,31 @@ export function getTargetDir(repo: string, sha: string): string {
   return path.join(TARGETS_DIR, `${repo}-${sha.slice(0, 7)}`);
 }
 
-export async function cloneAndStart(repo: string, sha: string, port: number): Promise<{ dir: string; pid: number }> {
+export async function cloneAndStart(repo: string, sha: string, port: number, opts?: { branch?: string; isLatest?: boolean }): Promise<{ dir: string; pid: number }> {
   const dir = getTargetDir(repo, sha);
 
   if (!existsSync(dir)) {
     const cloneUrl = `https://github.com/${OWNER}/${repo}.git`;
-    execSync(`git clone --depth 50 ${cloneUrl} ${dir}`, { stdio: 'pipe' });
-    execSync(`git checkout ${sha}`, { cwd: dir, stdio: 'pipe' });
+    if (opts?.isLatest) {
+      // Full clone for latest so we can pull later
+      execSync(`git clone ${cloneUrl} ${dir}`, { stdio: 'pipe' });
+      execSync(`git checkout ${sha}`, { cwd: dir, stdio: 'pipe' });
+    } else {
+      execSync(`git clone --depth 50 ${cloneUrl} ${dir}`, { stdio: 'pipe' });
+      execSync(`git checkout ${sha}`, { cwd: dir, stdio: 'pipe' });
+    }
   }
 
   // Install deps
   execSync('npm install', { cwd: dir, stdio: 'pipe', timeout: 120_000 });
 
-  // Start vite dev server with base path so assets route through the proxy
-  // Write a minimal override config that disables HMR (no live editing yet) and sets base path
+  const hmrEnabled = !!opts?.isLatest;
   const { writeFileSync } = await import('fs');
   writeFileSync(path.join(dir, 'vite.config.live-edit.js'), `
 import { defineConfig } from 'vite';
 export default defineConfig({
   base: '/proxy/${port}/',
-  server: { hmr: false, host: '0.0.0.0' },
+  server: { hmr: ${hmrEnabled}, host: '0.0.0.0' },
 });
 `);
 
@@ -45,6 +50,16 @@ export default defineConfig({
   await new Promise(r => setTimeout(r, 3000));
 
   return { dir, pid: child.pid! };
+}
+
+export async function pullLatest(entry: CacheEntry, newSha: string) {
+  if (!entry.branch) return;
+  execSync(`git fetch origin ${entry.branch}`, { cwd: entry.dir, stdio: 'pipe' });
+  execSync(`git reset --hard origin/${entry.branch}`, { cwd: entry.dir, stdio: 'pipe' });
+  // Quick npm install in case deps changed
+  try {
+    execSync('npm install', { cwd: entry.dir, stdio: 'pipe', timeout: 60_000 });
+  } catch {}
 }
 
 export async function stopServer(entry: CacheEntry) {

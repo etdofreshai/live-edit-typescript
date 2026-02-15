@@ -8,6 +8,8 @@ export interface CacheEntry {
   dir: string;
   lastAccessed: number;
   pid?: number;
+  branch?: string;
+  isLatest?: boolean;
 }
 
 const MAX_ENTRIES = 10;
@@ -73,6 +75,19 @@ export function getEntryByPort(port: number): CacheEntry | undefined {
     if (e.port === port) return e;
   }
   return undefined;
+}
+
+export function getEntryById(id: string): CacheEntry | undefined {
+  return cache.get(id);
+}
+
+export function updateEntry(id: string, updates: Partial<CacheEntry>) {
+  const e = cache.get(id);
+  if (e) Object.assign(e, updates);
+}
+
+export function getLatestEntries(): CacheEntry[] {
+  return [...cache.values()].filter(e => e.isLatest);
 }
 
 export { makeId };
