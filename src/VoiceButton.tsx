@@ -1,96 +1,122 @@
 import React, { useState, useRef } from 'react';
 
-type VoiceButtonState = 'idle' | 'recording' | 'processing';
+type VoiceState = 'idle' | 'recording' | 'transcribing' | 'sending';
 
 export function VoiceButton() {
-  const [state, setState] = useState<VoiceButtonState>('idle');
+  const [state, setState] = useState<VoiceState>('idle');
   const [transcript, setTranscript] = useState<string>('');
   const [showTranscript, setShowTranscript] = useState(false);
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const chunksRef = useRef<Blob[]>([]);
+  const fadeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const showText = (text: string, autoHide = true) => {
+    setTranscript(text);
+    setShowTranscript(true);
+    if (fadeTimerRef.current) clearTimeout(fadeTimerRef.current);
+    if (autoHide) {
+      fadeTimerRef.current = setTimeout(() => setShowTranscript(false), 4000);
+    }
+  };
 
   const startRecording = async () => {
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
       const mediaRecorder = new MediaRecorder(stream, { mimeType: 'audio/webm' });
-      
+
       chunksRef.current = [];
       mediaRecorder.ondataavailable = (e) => {
-        if (e.data.size > 0) {
-          chunksRef.current.push(e.data);
-        }
+        if (e.data.size > 0) chunksRef.current.push(e.data);
       };
 
       mediaRecorder.onstop = async () => {
-        stream.getTracks().forEach(track => track.stop());
+        stream.getTracks().forEach(t => t.stop());
         const audioBlob = new Blob(chunksRef.current, { type: 'audio/webm' });
-        await sendAudio(audioBlob);
+        await processAudio(audioBlob);
       };
 
       mediaRecorder.start();
       mediaRecorderRef.current = mediaRecorder;
       setState('recording');
+      setShowTranscript(false);
     } catch (err) {
       console.error('Failed to start recording:', err);
-      alert('Failed to access microphone. Please grant permission.');
+      showText('⚠ Microphone access denied');
     }
   };
 
   const stopRecording = () => {
-    if (mediaRecorderRef.current && mediaRecorderRef.current.state === 'recording') {
+    if (mediaRecorderRef.current?.state === 'recording') {
       mediaRecorderRef.current.stop();
-      setState('processing');
+      setState('transcribing');
     }
   };
 
-  const sendAudio = async (audioBlob: Blob) => {
+  const processAudio = async (audioBlob: Blob) => {
     const formData = new FormData();
     formData.append('audio', audioBlob, 'recording.webm');
 
     try {
-      const response = await fetch(`${import.meta.env.BASE_URL}api/voice`, {
+      // Step 1: Transcribe
+      const transcribeRes = await fetch(`${import.meta.env.BASE_URL}api/voice/transcribe`, {
         method: 'POST',
         body: formData,
       });
 
-      if (!response.ok) {
-        throw new Error(`Server error: ${response.status}`);
+      if (!transcribeRes.ok) throw new Error(`Transcription failed: ${transcribeRes.status}`);
+      const { transcript: text } = await transcribeRes.json();
+
+      if (!text || !text.trim()) {
+        showText('(no speech detected)');
+        setState('idle');
+        return;
       }
 
-      const data = await response.json();
-      setTranscript(data.transcript || 'No transcript received');
-      setShowTranscript(true);
-      setState('idle');
+      // Show transcript immediately
+      showText(`"${text}"`, false);
+      setState('sending');
 
-      // Auto-hide transcript after 3 seconds
-      setTimeout(() => {
-        setShowTranscript(false);
-      }, 3000);
+      // Step 2: Send to OpenClaw
+      const sendRes = await fetch(`${import.meta.env.BASE_URL}api/voice/send`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ text }),
+      });
+
+      if (!sendRes.ok) {
+        showText(`"${text}" — ⚠ failed to send`);
+      } else {
+        showText(`"${text}" — ✓ sent`);
+      }
+      setState('idle');
     } catch (err) {
-      console.error('Failed to send audio:', err);
-      alert('Failed to process audio. Check console for details.');
+      console.error('Voice error:', err);
+      showText('⚠ Error processing audio');
       setState('idle');
     }
   };
 
   const handleClick = () => {
-    if (state === 'idle') {
-      startRecording();
-    } else if (state === 'recording') {
-      stopRecording();
-    }
-    // If processing, do nothing
+    if (state === 'idle') startRecording();
+    else if (state === 'recording') stopRecording();
   };
+
+  const busy = state === 'transcribing' || state === 'sending';
 
   return (
     <>
       <button
-        className={`voice-btn ${state === 'recording' ? 'recording' : ''} ${state === 'processing' ? 'processing' : ''}`}
+        className={`voice-btn ${state === 'recording' ? 'recording' : ''} ${busy ? 'processing' : ''}`}
         onClick={handleClick}
-        disabled={state === 'processing'}
-        title={state === 'idle' ? 'Click to record' : state === 'recording' ? 'Click to stop' : 'Processing...'}
+        disabled={busy}
+        title={
+          state === 'idle' ? 'Click to record' :
+          state === 'recording' ? 'Click to stop' :
+          state === 'transcribing' ? 'Transcribing...' :
+          'Sending to OpenClaw...'
+        }
       >
-        {state === 'processing' ? (
+        {busy ? (
           <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
             <circle cx="12" cy="12" r="10" opacity="0.25" />
             <path d="M12 2 A10 10 0 0 1 22 12" className="spinner-path" />
@@ -104,10 +130,11 @@ export function VoiceButton() {
           </svg>
         )}
       </button>
-      
+
       {showTranscript && transcript && (
         <div className="voice-transcript">
-          {transcript}
+          <div className="voice-transcript-text">{transcript}</div>
+          {state === 'sending' && <div className="voice-transcript-status">Sending to OpenClaw...</div>}
         </div>
       )}
     </>

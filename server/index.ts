@@ -244,51 +244,53 @@ app.get('/api/cache/:id/files/*', (req, res) => {
   }
 });
 
-// Voice-to-OpenClaw endpoint
-app.post('/api/voice', upload.single('audio'), async (req, res) => {
+// Voice Step 1: Transcribe audio via Whisper
+app.post('/api/voice/transcribe', upload.single('audio'), async (req, res) => {
   try {
-    if (!req.file) {
-      return res.status(400).json({ error: 'No audio file provided' });
-    }
+    if (!req.file) return res.status(400).json({ error: 'No audio file provided' });
 
     const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
-    const OPENCLAW_GATEWAY_URL = process.env.OPENCLAW_GATEWAY_URL;
-    const OPENCLAW_GATEWAY_TOKEN = process.env.OPENCLAW_GATEWAY_TOKEN;
+    if (!OPENAI_API_KEY) return res.status(500).json({ error: 'OPENAI_API_KEY not configured' });
 
-    if (!OPENAI_API_KEY) {
-      return res.status(500).json({ error: 'OPENAI_API_KEY not configured' });
-    }
-    if (!OPENCLAW_GATEWAY_URL || !OPENCLAW_GATEWAY_TOKEN) {
-      return res.status(500).json({ error: 'OpenClaw gateway not configured' });
-    }
-
-    // Step 1: Transcribe audio using OpenAI Whisper
     const blob = new Blob([new Uint8Array(req.file.buffer)], { type: req.file.mimetype || 'audio/webm' });
     const formData = new FormData();
     formData.append('file', blob, 'audio.webm');
     formData.append('model', 'whisper-1');
 
-    const whisperResponse = await fetch('https://api.openai.com/v1/audio/transcriptions', {
+    const whisperRes = await fetch('https://api.openai.com/v1/audio/transcriptions', {
       method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${OPENAI_API_KEY}`,
-      },
+      headers: { 'Authorization': `Bearer ${OPENAI_API_KEY}` },
       body: formData,
     });
 
-    if (!whisperResponse.ok) {
-      const errorText = await whisperResponse.text();
-      console.error('Whisper API error:', errorText);
-      return res.status(500).json({ error: 'Transcription failed', details: errorText });
+    if (!whisperRes.ok) {
+      const err = await whisperRes.text();
+      console.error('Whisper API error:', err);
+      return res.status(500).json({ error: 'Transcription failed', details: err });
     }
 
-    const whisperData = await whisperResponse.json() as { text: string };
-    const transcript = whisperData.text;
+    const { text } = await whisperRes.json() as { text: string };
+    console.log('[voice] Transcribed:', text);
+    res.json({ transcript: text });
+  } catch (e: any) {
+    console.error('[voice/transcribe] Error:', e);
+    res.status(500).json({ error: e.message });
+  }
+});
 
-    console.log('[voice] Transcribed:', transcript);
+// Voice Step 2: Send text to OpenClaw gateway
+app.post('/api/voice/send', async (req, res) => {
+  try {
+    const { text } = req.body;
+    if (!text) return res.status(400).json({ error: 'No text provided' });
 
-    // Step 2: Send transcript to OpenClaw gateway (OpenAI-compatible endpoint)
-    const gatewayResponse = await fetch(`${OPENCLAW_GATEWAY_URL}/v1/chat/completions`, {
+    const OPENCLAW_GATEWAY_URL = process.env.OPENCLAW_GATEWAY_URL;
+    const OPENCLAW_GATEWAY_TOKEN = process.env.OPENCLAW_GATEWAY_TOKEN;
+    if (!OPENCLAW_GATEWAY_URL || !OPENCLAW_GATEWAY_TOKEN) {
+      return res.status(500).json({ error: 'OpenClaw gateway not configured' });
+    }
+
+    const gatewayRes = await fetch(`${OPENCLAW_GATEWAY_URL}/v1/chat/completions`, {
       method: 'POST',
       headers: {
         'Authorization': `Bearer ${OPENCLAW_GATEWAY_TOKEN}`,
@@ -296,23 +298,20 @@ app.post('/api/voice', upload.single('audio'), async (req, res) => {
       },
       body: JSON.stringify({
         model: 'openclaw:main',
-        messages: [{ role: 'user', content: transcript }],
+        messages: [{ role: 'user', content: text }],
       }),
     });
 
-    if (!gatewayResponse.ok) {
-      const errorText = await gatewayResponse.text();
-      console.error('OpenClaw gateway error:', errorText);
-      // Don't fail the request - we got the transcript, that's what matters
-      console.warn('[voice] Gateway send failed, but returning transcript anyway');
-    } else {
-      console.log('[voice] Sent to OpenClaw');
+    if (!gatewayRes.ok) {
+      const err = await gatewayRes.text();
+      console.error('OpenClaw gateway error:', err);
+      return res.status(502).json({ error: 'Gateway send failed', details: err });
     }
 
-    // Step 3: Return transcript immediately
-    res.json({ transcript, status: 'sent' });
+    console.log('[voice] Sent to OpenClaw:', text.slice(0, 50));
+    res.json({ status: 'sent' });
   } catch (e: any) {
-    console.error('[voice] Error:', e);
+    console.error('[voice/send] Error:', e);
     res.status(500).json({ error: e.message });
   }
 });
