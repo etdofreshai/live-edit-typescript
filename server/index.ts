@@ -84,60 +84,27 @@ app.delete('/api/cache/:id', async (req, res) => {
   res.json({ ok });
 });
 
-// Proxy /proxy/:port/* to target Vite dev servers
-// Strip /proxy/:port prefix and inject <base> tag so absolute paths resolve correctly
+// Proxy /proxy/:port/* → target Vite dev server
+// Target Vite runs with --base /proxy/{port}/ so it expects the full prefixed path
+// Do NOT strip the prefix — forward as-is
 app.use('/proxy/:port', (req, res) => {
   const port = parseInt(req.params.port);
   if (!port || !getEntryByPort(port)) {
     return res.status(404).json({ error: 'No server on that port' });
   }
-  req.url = req.url || '/';
-
-  // For HTML requests (initial page load), intercept and inject <base> tag
-  const isHtmlRequest = req.url === '/' || req.url === '/index.html' || req.headers.accept?.includes('text/html');
-  if (isHtmlRequest && req.method === 'GET') {
-    // Make a sub-request to the target
-    const targetReq = http.request({
-      hostname: 'localhost',
-      port,
-      path: req.url,
-      method: 'GET',
-      headers: { ...req.headers, host: `localhost:${port}` },
-    }, (targetRes) => {
-      const chunks: Buffer[] = [];
-      targetRes.on('data', (chunk: Buffer) => chunks.push(chunk));
-      targetRes.on('end', () => {
-        let body = Buffer.concat(chunks).toString();
-        // Inject <base> tag so /src/main.ts resolves to /proxy/{port}/src/main.ts
-        if (body.includes('<head>')) {
-          body = body.replace('<head>', `<head><base href="/proxy/${port}/">`);
-        }
-        res.writeHead(targetRes.statusCode || 200, {
-          ...targetRes.headers,
-          'content-length': Buffer.byteLength(body),
-        });
-        res.end(body);
-      });
-    });
-    targetReq.on('error', (err) => {
-      res.status(502).json({ error: err.message });
-    });
-    targetReq.end();
-  } else {
-    proxy.web(req, res, { target: `http://localhost:${port}` });
-  }
+  // Reconstruct the full URL with the /proxy/{port} prefix
+  req.url = `/proxy/${port}${req.url || '/'}`;
+  proxy.web(req, res, { target: `http://localhost:${port}` });
 });
 
 const server = http.createServer(app);
 
-// WebSocket upgrade for HMR
+// WebSocket upgrade for HMR — also keep prefix intact
 server.on('upgrade', (req, socket, head) => {
   const match = req.url?.match(/^\/proxy\/(\d+)(\/.*)?$/);
   if (match) {
     const port = parseInt(match[1]);
     if (getEntryByPort(port)) {
-      // Strip the /proxy/{port} prefix for WS too
-      req.url = match[2] || '/';
       proxy.ws(req, socket, head, { target: `http://localhost:${port}` });
       return;
     }
