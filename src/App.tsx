@@ -19,6 +19,9 @@ export default function App() {
   const [loading, setLoading] = useState('');
   const [error, setError] = useState('');
   const [sidebarOpen, setSidebarOpen] = useState(true);
+  const [activeEntryId, setActiveEntryId] = useState<string | null>(null);
+
+  const activeEntry = cache.find(e => e.id === activeEntryId) || (previewPort ? cache.find(e => e.port === previewPort) : null);
 
   useEffect(() => { api('/api/repos').then(setRepos).catch(e => setError(e.message)); refreshCache(); }, []);
 
@@ -42,7 +45,8 @@ export default function App() {
         body: JSON.stringify({ repo: selectedRepo, sha }),
       });
       if (entry.error) { setError(entry.error); return; }
-      setPreviewPort(entry.port);
+      setPreviewPort(entry.port || null);
+      setActiveEntryId(entry.id);
       setSidebarOpen(false);
       refreshCache();
     } catch (e: any) { setError(e.message); }
@@ -57,7 +61,8 @@ export default function App() {
         body: JSON.stringify({ repo: selectedRepo, branch: selectedBranch }),
       });
       if (entry.error) { setError(entry.error); return; }
-      setPreviewPort(entry.port);
+      setPreviewPort(entry.port || null); setActiveEntryId(entry.id);
+      setActiveEntryId(entry.id);
       setSidebarOpen(false);
       refreshCache();
     } catch (e: any) { setError(e.message); }
