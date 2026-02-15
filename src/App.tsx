@@ -50,14 +50,14 @@ export default function App() {
   const [expandedDirs, setExpandedDirs] = useState<Set<string>>(new Set());
   const [restoringState, setRestoringState] = useState(true);
 
+  const activeEntry = cache.find(e => e.id === activeEntryId) || (previewPort ? cache.find(e => e.port === previewPort) : null);
+
   // Persist state on changes
   useEffect(() => {
     if (restoringState) return;
     const lastRun = activeEntry ? { repo: activeEntry.repo, sha: activeEntry.sha, branch: activeEntry.branch, isLatest: activeEntry.isLatest } : null;
     savePersistedState({ selectedRepo, selectedBranch, activeEntryId, previewPort, sidebarOpen, lastRun });
   }, [selectedRepo, selectedBranch, activeEntryId, previewPort, sidebarOpen, restoringState, activeEntry]);
-
-  const activeEntry = cache.find(e => e.id === activeEntryId) || (previewPort ? cache.find(e => e.port === previewPort) : null);
 
   const showEntry = async (entry: CacheEntry) => {
     setActiveEntryId(entry.id);
