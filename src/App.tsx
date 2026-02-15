@@ -298,7 +298,7 @@ export default function App() {
           <span className={`dot ${previewPort || activeEntry?.type === 'static' ? 'green' : 'gray'}`} />
           {activeEntry ? (
             <>
-              <code style={{ color: '#89b4fa', marginRight: 6 }}>{activeEntry.sha.slice(0, 7)}</code>
+              <a href={`https://github.com/etdofreshai/${activeEntry.repo}/commit/${activeEntry.sha}`} target="_blank" rel="noopener noreferrer" style={{ color: '#89b4fa', marginRight: 6, fontFamily: 'monospace', textDecoration: 'none' }}>{activeEntry.sha.slice(0, 7)}</a>
               {activeEntry.commitDate && (
                 <span style={{ marginRight: 6 }}>{new Date(activeEntry.commitDate).toLocaleString()}</span>
               )}
