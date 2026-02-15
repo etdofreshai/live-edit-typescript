@@ -43,6 +43,7 @@ function IframeWithRetry({ port }: { port: number }) {
   useEffect(() => {
     setReady(false);
     setRetryCount(0);
+    setCancelled(false);
     cancelledRef.current = false;
 
     const poll = async () => {
@@ -51,7 +52,7 @@ function IframeWithRetry({ port }: { port: number }) {
         try {
           const res = await fetch(`/proxy/${port}/`, { method: 'HEAD' });
           if (res.ok) {
-            if (!cancelled) setReady(true);
+            if (!cancelledRef.current) setReady(true);
             return;
           }
         } catch {}
@@ -492,7 +493,7 @@ export default function App() {
             </div>
           )}
           {previewPort ? (
-            <IframeWithRetry port={previewPort} />
+            <IframeWithRetry key={`${activeEntryId}-${previewPort}`} port={previewPort} />
           ) : null}
           {previewPort && (
             <div className="preview-fallback" style={{ display: 'none', alignItems: 'center', justifyContent: 'center', height: '100%', color: '#6c7086', fontSize: 14, flexDirection: 'column', gap: 8, position: 'absolute', inset: 0 }}>
