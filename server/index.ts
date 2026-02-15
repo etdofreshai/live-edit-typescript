@@ -76,6 +76,7 @@ app.delete('/api/cache/:id', async (req, res) => {
 });
 
 // Proxy requests to target dev servers: /proxy/:port/...
+// Target Vite servers run with --base /proxy/{port}/ so they expect the full path
 app.use('/proxy/:port', (req, res, next) => {
   const port = parseInt(req.params.port);
   if (!port || !getEntryByPort(port)) {
@@ -84,7 +85,6 @@ app.use('/proxy/:port', (req, res, next) => {
   const proxy = createProxyMiddleware({
     target: `http://localhost:${port}`,
     changeOrigin: true,
-    pathRewrite: { [`^/proxy/${port}`]: '' },
     ws: true,
   });
   proxy(req, res, next);
@@ -92,7 +92,7 @@ app.use('/proxy/:port', (req, res, next) => {
 
 const server = app.listen(3000, () => console.log('API server on :3000'));
 
-// Handle WebSocket upgrades for proxy
+// Handle WebSocket upgrades for HMR
 server.on('upgrade', (req, socket, head) => {
   const match = req.url?.match(/^\/proxy\/(\d+)(\/.*)?$/);
   if (match) {
@@ -101,7 +101,6 @@ server.on('upgrade', (req, socket, head) => {
       const proxy = createProxyMiddleware({
         target: `http://localhost:${port}`,
         changeOrigin: true,
-        pathRewrite: { [`^/proxy/${port}`]: '' },
         ws: true,
       });
       proxy.upgrade?.(req, socket, head);

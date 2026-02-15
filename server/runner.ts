@@ -22,8 +22,8 @@ export async function cloneAndStart(repo: string, sha: string, port: number): Pr
   // Install deps
   execSync('npm install', { cwd: dir, stdio: 'pipe', timeout: 120_000 });
 
-  // Start vite dev server
-  const child = spawn('npx', ['vite', '--port', String(port), '--host', '0.0.0.0', '--strictPort'], {
+  // Start vite dev server with base path so assets route through the proxy
+  const child = spawn('npx', ['vite', '--port', String(port), '--host', '0.0.0.0', '--strictPort', '--base', `/proxy/${port}/`], {
     cwd: dir,
     stdio: 'ignore',
     detached: true,
