@@ -1,4 +1,5 @@
 import React, { useState, useRef, useCallback } from 'react';
+import { soundStartRecord, soundStopRecord, soundTranscribed, soundSent, soundError } from './sounds';
 
 type MessageStatus = 'transcribing' | 'sending' | 'sent' | 'error';
 
@@ -50,11 +51,13 @@ export function VoiceButton({ context }: { context?: VoiceContext }) {
 
       if (!text?.trim()) {
         updateMsg(id, { text: '(no speech detected)', status: 'error' });
+        soundError();
         setTimeout(() => removeMsg(id), 3000);
         return;
       }
 
       updateMsg(id, { text: `"${text}"`, status: 'sending' });
+      soundTranscribed();
 
       // Send to OpenClaw
       const sendRes = await fetch(`${import.meta.env.BASE_URL}api/voice/send`, {
@@ -65,14 +68,17 @@ export function VoiceButton({ context }: { context?: VoiceContext }) {
 
       if (!sendRes.ok) {
         updateMsg(id, { status: 'error' });
+        soundError();
         setTimeout(() => removeMsg(id), 4000);
       } else {
         updateMsg(id, { status: 'sent' });
+        soundSent();
         setTimeout(() => removeMsg(id), 2500);
       }
     } catch (err) {
       console.error('Voice error:', err);
       updateMsg(id, { text: '⚠ Error', status: 'error' });
+      soundError();
       setTimeout(() => removeMsg(id), 3000);
     }
   }, [updateMsg, removeMsg]);
@@ -96,6 +102,7 @@ export function VoiceButton({ context }: { context?: VoiceContext }) {
       mediaRecorder.start();
       mediaRecorderRef.current = mediaRecorder;
       setRecording(true);
+      soundStartRecord();
     } catch (err) {
       console.error('Failed to start recording:', err);
     }
@@ -105,6 +112,7 @@ export function VoiceButton({ context }: { context?: VoiceContext }) {
     if (mediaRecorderRef.current?.state === 'recording') {
       mediaRecorderRef.current.stop();
       setRecording(false);
+      soundStopRecord();
     }
   };
 
