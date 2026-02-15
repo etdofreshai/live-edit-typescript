@@ -146,11 +146,12 @@ export default function App() {
             <div>
               <span className="cache-repo">{e.repo}</span>
               <code className="cache-sha">{e.sha.slice(0, 7)}</code>
-              <span className="cache-port">:{e.port}</span>
+              {e.type !== 'static' && <span className="cache-port">:{e.port}</span>}
+              {e.type === 'static' && <span style={{ marginLeft: 8, color: '#6b7280', fontSize: 11 }}>static</span>}
               {e.isLatest && <span className="cache-badge">latest · {e.branch}</span>}
             </div>
             <div>
-              <button className="btn-icon" onClick={() => { setPreviewPort(e.port); setSidebarOpen(false); }}>👁</button>
+              <button className="btn-icon" onClick={() => showEntry(e)}>👁</button>
               <button className="btn-icon danger" onClick={() => remove(e.id)}>✕</button>
             </div>
           </div>
@@ -159,18 +160,95 @@ export default function App() {
 
       <div className="preview-area">
         <div className="preview-header">
-          <span className={`dot ${previewPort ? 'green' : 'gray'}`} />
-          {previewPort ? `Preview — port ${previewPort}` : 'No preview'}
+          <span className={`dot ${previewPort || activeEntry?.type === 'static' ? 'green' : 'gray'}`} />
+          {previewPort ? `Preview — port ${previewPort}` : activeEntry?.type === 'static' ? `Files — ${activeEntry.repo}` : 'No preview'}
         </div>
         <div className="preview-body">
           {loading && (
             <div className="loading-overlay">
               <span className="spinner spinner-large" />
-              <div className="loading-text loading-pulse">Starting server… this may take a minute</div>
+              <div className="loading-text loading-pulse">
+                {activeEntry?.type === 'static' ? 'Cloning repository…' : 'Starting server… this may take a minute'}
+              </div>
             </div>
           )}
           {previewPort ? (
             <iframe src={`/proxy/${previewPort}/`} />
+          ) : activeEntry?.type === 'static' ? (
+            <div style={{ display: 'flex', height: '100%' }}>
+              <div style={{ width: 260, borderRight: '1px solid #ddd', overflow: 'auto', fontSize: 13, flexShrink: 0 }}>
+                {(() => {
+                  const renderItems = (parentPath: string, depth: number): React.ReactNode[] => {
+                    const items = files
+                      .filter(p => {
+                        if (!parentPath) return !p.replace(/\/$/, '').includes('/');
+                        return p.startsWith(parentPath) && p !== parentPath &&
+                          !p.slice(parentPath.length).replace(/\/$/, '').includes('/');
+                      })
+                      .sort((a, b) => {
+                        const aD = a.endsWith('/'), bD = b.endsWith('/');
+                        if (aD !== bD) return aD ? -1 : 1;
+                        return a.localeCompare(b);
+                      });
+                    return items.map(item => {
+                      const isDir = item.endsWith('/');
+                      const expanded = expandedDirs.has(item);
+                      const name = item.replace(/\/$/, '').split('/').pop()!;
+                      const isSelected = currentFile?.path === item;
+                      return (
+                        <div key={item}>
+                          <div
+                            onClick={() => isDir
+                              ? setExpandedDirs(prev => { const n = new Set(prev); n.has(item) ? n.delete(item) : n.add(item); return n; })
+                              : viewFile(activeEntry!.id, item)
+                            }
+                            style={{
+                              padding: '3px 8px', paddingLeft: 8 + depth * 16, cursor: 'pointer',
+                              background: isSelected ? '#e0e7ff' : 'transparent',
+                              whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
+                            }}
+                            onMouseEnter={e => { if (!isSelected) e.currentTarget.style.background = '#f3f4f6'; }}
+                            onMouseLeave={e => { if (!isSelected) e.currentTarget.style.background = 'transparent'; }}
+                          >
+                            <span style={{ marginRight: 4 }}>{isDir ? (expanded ? '📂' : '📁') : '📄'}</span>
+                            {name}
+                          </div>
+                          {isDir && expanded && renderItems(item, depth + 1)}
+                        </div>
+                      );
+                    });
+                  };
+                  return renderItems('', 0);
+                })()}
+              </div>
+              <div style={{ flex: 1, overflow: 'auto', display: 'flex', flexDirection: 'column' }}>
+                {currentFile ? (
+                  <>
+                    <div style={{ padding: '6px 12px', borderBottom: '1px solid #eee', fontSize: 12, color: '#666', background: '#fafafa' }}>
+                      {currentFile.path.split('/').map((part, i, arr) => (
+                        <span key={i}>
+                          {i > 0 && <span style={{ margin: '0 2px', color: '#ccc' }}>/</span>}
+                          <span style={{ color: i === arr.length - 1 ? '#111' : '#666' }}>{part}</span>
+                        </span>
+                      ))}
+                    </div>
+                    {currentFile.binary ? (
+                      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', flex: 1, color: '#999' }}>
+                        Binary file — cannot preview
+                      </div>
+                    ) : (
+                      <pre style={{ margin: 0, padding: 12, fontSize: 13, fontFamily: 'ui-monospace, monospace', overflow: 'auto', flex: 1, background: '#fafafa', lineHeight: 1.5 }}>
+                        {currentFile.content}
+                      </pre>
+                    )}
+                  </>
+                ) : (
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', flex: 1, color: '#999' }}>
+                    Select a file to view
+                  </div>
+                )}
+              </div>
+            </div>
           ) : (
             <div className="preview-placeholder">
               Select a commit and click Run to preview
