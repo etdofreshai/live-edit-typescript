@@ -34,6 +34,38 @@ function savePersistedState(state: PersistedState) {
 
 const api = (path: string, opts?: RequestInit) => fetch(path, opts).then(r => r.json());
 
+function IframeWithRetry({ port }: { port: number }) {
+  const [retryKey, setRetryKey] = useState(0);
+  const maxRetries = 5;
+  const retryCount = useRef(0);
+
+  useEffect(() => { retryCount.current = 0; }, [port]);
+
+  const handleLoad = (e: React.SyntheticEvent<HTMLIFrameElement>) => {
+    try {
+      const iframe = e.target as HTMLIFrameElement;
+      const doc = iframe.contentDocument;
+      const body = doc?.body?.textContent || '';
+      const title = doc?.title || '';
+      if (/502|503|504|Bad Gateway|No server on that port/i.test(title + body)) {
+        if (retryCount.current < maxRetries) {
+          retryCount.current++;
+          setTimeout(() => setRetryKey(k => k + 1), 2000);
+        }
+      }
+    } catch (_) { /* cross-origin = loaded successfully */ }
+  };
+
+  return (
+    <iframe
+      key={retryKey}
+      src={`/proxy/${port}/?r=${retryKey}`}
+      onLoad={handleLoad}
+      style={{ background: '#1a1a2e' }}
+    />
+  );
+}
+
 export default function App() {
   const saved = useRef(loadPersistedState());
   const [repos, setRepos] = useState<any[]>([]);
@@ -51,6 +83,9 @@ export default function App() {
   const [currentFile, setCurrentFile] = useState<{ path: string; content?: string; binary?: boolean } | null>(null);
   const [expandedDirs, setExpandedDirs] = useState<Set<string>>(new Set());
   const [restoringState, setRestoringState] = useState(true);
+  const [branchFrom, setBranchFrom] = useState<string | null>(null);
+  const [newBranchName, setNewBranchName] = useState('');
+  const [branchError, setBranchError] = useState('');
 
   const activeEntry = cache.find(e => e.id === activeEntryId) || (previewPort ? cache.find(e => e.port === previewPort) : null);
 
@@ -164,6 +199,23 @@ export default function App() {
   const selectRepo = async (name: string) => {
     setSelectedRepo(name); setSelectedBranch(''); setCommits([]);
     setBranches(await api(`/api/repos/${name}/branches`));
+  };
+
+  const handleCreateBranch = async (fromBranch: string, name: string) => {
+    setBranchError('');
+    try {
+      const res = await fetch(`/api/repos/${selectedRepo}/branches`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name, from: fromBranch }),
+      });
+      const data = await res.json();
+      if (!res.ok) { setBranchError(data.error || 'Failed to create branch'); return; }
+      setBranchFrom(null);
+      setNewBranchName('');
+      setBranches(await api(`/api/repos/${selectedRepo}/branches`));
+      selectBranch(name);
+    } catch (e: any) { setBranchError(e.message); }
   };
 
   const selectBranch = async (branch: string) => {
@@ -331,21 +383,7 @@ export default function App() {
             </div>
           )}
           {previewPort ? (
-            <iframe
-              src={`/proxy/${previewPort}/`}
-              onError={() => {}}
-              style={{ background: '#1a1a2e' }}
-              onLoad={e => {
-                try {
-                  const doc = (e.target as HTMLIFrameElement).contentDocument;
-                  if (doc && doc.title && /502|503|504|Bad Gateway/i.test(doc.title)) {
-                    (e.target as HTMLIFrameElement).style.display = 'none';
-                    const sib = (e.target as HTMLIFrameElement).parentElement?.querySelector('.preview-fallback') as HTMLElement;
-                    if (sib) sib.style.display = 'flex';
-                  }
-                } catch (_) { /* cross-origin, that's fine */ }
-              }}
-            />
+            <IframeWithRetry port={previewPort} />
           ) : null}
           {previewPort && (
             <div className="preview-fallback" style={{ display: 'none', alignItems: 'center', justifyContent: 'center', height: '100%', color: '#6c7086', fontSize: 14, flexDirection: 'column', gap: 8, position: 'absolute', inset: 0 }}>

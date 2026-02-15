@@ -37,4 +37,20 @@ export async function getCommit(repo: string, sha: string): Promise<{ message: s
   };
 }
 
+export async function createBranch(repo: string, name: string, fromSha: string) {
+  const res = await fetch(`https://api.github.com/repos/${OWNER}/${repo}/git/refs`, {
+    method: 'POST',
+    headers: { ...headers, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ ref: `refs/heads/${name}`, sha: fromSha }),
+  });
+  if (!res.ok) {
+    const text = await res.text();
+    if (res.status === 422 && text.includes('Reference already exists')) {
+      throw new Error(`Branch "${name}" already exists`);
+    }
+    throw new Error(`GitHub API ${res.status}: ${text}`);
+  }
+  return res.json();
+}
+
 export { OWNER };

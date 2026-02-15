@@ -4,7 +4,7 @@ import http from 'http';
 import httpProxy from 'http-proxy';
 import fs from 'fs';
 import pathModule from 'path';
-import { listRepos, listBranches, listCommits, getBranchHead, getCommit } from './github.js';
+import { listRepos, listBranches, listCommits, getBranchHead, getCommit, createBranch } from './github.js';
 import { getEntry, addEntry, evictIfNeeded, allocatePort, removeEntry, listEntries, makeId, getEntryByPort, getLatestEntries, updateEntry, getEntryById } from './cache-manager.js';
 import { cloneAndStart, getTargetDir, pullLatest } from './runner.js';
 import { webhookRouter, registerWebhook, unregisterWebhook } from './webhook.js';
@@ -39,6 +39,19 @@ app.get('/api/repos/:repo/branches', async (req, res) => {
     res.json(await listBranches(req.params.repo));
   } catch (e: any) {
     res.status(500).json({ error: e.message });
+  }
+});
+
+app.post('/api/repos/:repo/branches', async (req, res) => {
+  const { name, from } = req.body;
+  if (!name || !from) return res.status(400).json({ error: 'name and from required' });
+  try {
+    const sha = await getBranchHead(req.params.repo, from);
+    const ref = await createBranch(req.params.repo, name, sha);
+    res.json({ name, sha, ref: ref.ref });
+  } catch (e: any) {
+    const status = e.message.includes('already exists') ? 409 : 500;
+    res.status(status).json({ error: e.message });
   }
 });
 
