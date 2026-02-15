@@ -7,9 +7,12 @@ import pathModule from 'path';
 import { listRepos, listBranches, listCommits, getBranchHead } from './github.js';
 import { getEntry, addEntry, evictIfNeeded, allocatePort, removeEntry, listEntries, makeId, getEntryByPort, getLatestEntries, updateEntry, getEntryById } from './cache-manager.js';
 import { cloneAndStart, getTargetDir, pullLatest } from './runner.js';
+import { webhookRouter, registerWebhook } from './webhook.js';
 
 const app = express();
 app.use(cors());
+// Webhook route MUST come before express.json() — it needs raw body
+app.use(webhookRouter);
 app.use(express.json());
 
 // Single reusable proxy instance
@@ -110,6 +113,10 @@ app.post('/api/run-latest', async (req, res) => {
       type,
     };
     addEntry(entry);
+
+    // Auto-register webhook for this repo
+    registerWebhook(repo, req.get('host'));
+
     res.json(entry);
   } catch (e: any) {
     res.status(500).json({ error: e.message });
