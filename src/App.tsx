@@ -863,7 +863,7 @@ export default function App() {
         </div>
       )}
 
-      <VoiceButton />
+      <VoiceButton context={activeEntry ? { owner: 'etdofreshai', repo: activeEntry.repo, branch: activeEntry.branch, sha: activeEntry.sha } : undefined} />
     </div>
   );
 }

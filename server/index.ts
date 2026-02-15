@@ -281,7 +281,7 @@ app.post('/api/voice/transcribe', upload.single('audio'), async (req, res) => {
 // Voice Step 2: Send text to OpenClaw gateway
 app.post('/api/voice/send', async (req, res) => {
   try {
-    const { text } = req.body;
+    const { text, context } = req.body;
     if (!text) return res.status(400).json({ error: 'No text provided' });
 
     const OPENCLAW_GATEWAY_URL = process.env.OPENCLAW_GATEWAY_URL;
@@ -298,7 +298,10 @@ app.post('/api/voice/send', async (req, res) => {
       },
       body: JSON.stringify({
         model: 'openclaw:main',
-        messages: [{ role: 'user', content: text }],
+        messages: [{ role: 'user', content: context?.repo
+          ? `[Live Edit: ${context.owner || 'etdofreshai'}/${context.repo}${context.branch ? ` @ ${context.branch}` : ''}${context.sha ? ` (${context.sha.slice(0, 7)})` : ''}]\n\n${text}`
+          : text
+        }],
       }),
     });
 

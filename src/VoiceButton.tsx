@@ -2,7 +2,14 @@ import React, { useState, useRef } from 'react';
 
 type VoiceState = 'idle' | 'recording' | 'transcribing' | 'sending';
 
-export function VoiceButton() {
+interface VoiceContext {
+  owner?: string;
+  repo?: string;
+  branch?: string;
+  sha?: string;
+}
+
+export function VoiceButton({ context }: { context?: VoiceContext }) {
   const [state, setState] = useState<VoiceState>('idle');
   const [transcript, setTranscript] = useState<string>('');
   const [showTranscript, setShowTranscript] = useState(false);
@@ -80,7 +87,7 @@ export function VoiceButton() {
       const sendRes = await fetch(`${import.meta.env.BASE_URL}api/voice/send`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ text }),
+        body: JSON.stringify({ text, context }),
       });
 
       if (!sendRes.ok) {
