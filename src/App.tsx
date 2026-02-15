@@ -38,15 +38,16 @@ function IframeWithRetry({ port }: { port: number }) {
   const [ready, setReady] = useState(false);
   const [retryCount, setRetryCount] = useState(0);
   const maxRetries = 30; // up to 60s
+  const cancelledRef = useRef(false);
 
   useEffect(() => {
     setReady(false);
     setRetryCount(0);
-    let cancelled = false;
+    cancelledRef.current = false;
 
     const poll = async () => {
       for (let i = 0; i < maxRetries; i++) {
-        if (cancelled) return;
+        if (cancelledRef.current) return;
         try {
           const res = await fetch(`/proxy/${port}/`, { method: 'HEAD' });
           if (res.ok) {
@@ -54,19 +55,28 @@ function IframeWithRetry({ port }: { port: number }) {
             return;
           }
         } catch {}
-        if (!cancelled) setRetryCount(i + 1);
+        if (!cancelledRef.current) setRetryCount(i + 1);
         await new Promise(r => setTimeout(r, 2000));
       }
     };
     poll();
-    return () => { cancelled = true; };
+    return () => { cancelledRef.current = true; };
   }, [port]);
+
+  const [cancelled, setCancelled] = useState(false);
 
   if (!ready) {
     return (
       <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', height: '100%', color: '#6b7280', gap: 12 }}>
-        <div className="spinner" />
-        <div>Waiting for server on port {port}… {retryCount > 0 ? `(attempt ${retryCount}/${maxRetries})` : ''}</div>
+        {cancelled ? (
+          <div>Cancelled</div>
+        ) : (
+          <>
+            <div className="spinner" />
+            <div>Waiting for server on port {port}… {retryCount > 0 ? `(attempt ${retryCount}/${maxRetries})` : ''}</div>
+            <button onClick={() => { setCancelled(true); cancelledRef.current = true; }} style={{ marginTop: 8, padding: '4px 16px', background: 'transparent', border: '1px solid #555', borderRadius: 6, color: '#999', cursor: 'pointer', fontSize: 13 }}>Cancel</button>
+          </>
+        )}
       </div>
     );
   }
