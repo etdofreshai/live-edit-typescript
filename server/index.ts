@@ -4,7 +4,7 @@ import http from 'http';
 import httpProxy from 'http-proxy';
 import fs from 'fs';
 import pathModule from 'path';
-import { listRepos, listBranches, listCommits, getBranchHead, getCommit, createBranch } from './github.js';
+import { listRepos, listBranches, listCommits, getBranchHead, getCommit, createBranch, getDefaultBranch, compareBranches, createPullRequest, OWNER } from './github.js';
 import { getEntry, addEntry, evictIfNeeded, allocatePort, removeEntry, listEntries, makeId, getEntryByPort, getLatestEntries, updateEntry, getEntryById } from './cache-manager.js';
 import { cloneAndStart, getTargetDir, pullLatest } from './runner.js';
 import { webhookRouter, registerWebhook, unregisterWebhook } from './webhook.js';
@@ -52,6 +52,30 @@ app.post('/api/repos/:repo/branches', async (req, res) => {
   } catch (e: any) {
     const status = e.message.includes('already exists') ? 409 : 500;
     res.status(status).json({ error: e.message });
+  }
+});
+
+app.get('/api/repos/:repo/branches/:branch/compare', async (req, res) => {
+  try {
+    const defaultBranch = await getDefaultBranch(req.params.repo);
+    if (req.params.branch === defaultBranch) {
+      return res.json({ ahead: 0, behind: 0, defaultBranch });
+    }
+    const cmp = await compareBranches(req.params.repo, defaultBranch, req.params.branch);
+    res.json({ ahead: cmp.ahead_by, behind: cmp.behind_by, defaultBranch });
+  } catch (e: any) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+app.post('/api/repos/:repo/pulls', async (req, res) => {
+  const { head, base, title, body } = req.body;
+  if (!head || !base || !title) return res.status(400).json({ error: 'head, base, and title required' });
+  try {
+    const pr = await createPullRequest(req.params.repo, title, head, base, body);
+    res.json({ url: pr.html_url, number: pr.number });
+  } catch (e: any) {
+    res.status(500).json({ error: e.message });
   }
 });
 

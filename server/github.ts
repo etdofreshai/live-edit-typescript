@@ -53,4 +53,27 @@ export async function createBranch(repo: string, name: string, fromSha: string) 
   return res.json();
 }
 
+export async function getDefaultBranch(repo: string): Promise<string> {
+  const data = await ghFetch(`/repos/${OWNER}/${repo}`);
+  return data.default_branch;
+}
+
+export async function compareBranches(repo: string, base: string, head: string) {
+  const data = await ghFetch(`/repos/${OWNER}/${repo}/compare/${encodeURIComponent(base)}...${encodeURIComponent(head)}`);
+  return { ahead_by: data.ahead_by, behind_by: data.behind_by, status: data.status };
+}
+
+export async function createPullRequest(repo: string, title: string, head: string, base: string, body?: string) {
+  const res = await fetch(`https://api.github.com/repos/${OWNER}/${repo}/pulls`, {
+    method: 'POST',
+    headers: { ...headers, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ title, head, base, body: body || '' }),
+  });
+  if (!res.ok) {
+    const text = await res.text();
+    throw new Error(`GitHub API ${res.status}: ${text}`);
+  }
+  return res.json();
+}
+
 export { OWNER };

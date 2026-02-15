@@ -35,32 +35,45 @@ function savePersistedState(state: PersistedState) {
 const api = (path: string, opts?: RequestInit) => fetch(path, opts).then(r => r.json());
 
 function IframeWithRetry({ port }: { port: number }) {
-  const [retryKey, setRetryKey] = useState(0);
-  const maxRetries = 5;
-  const retryCount = useRef(0);
+  const [ready, setReady] = useState(false);
+  const [retryCount, setRetryCount] = useState(0);
+  const maxRetries = 10;
 
-  useEffect(() => { retryCount.current = 0; }, [port]);
+  useEffect(() => {
+    setReady(false);
+    setRetryCount(0);
+    let cancelled = false;
 
-  const handleLoad = (e: React.SyntheticEvent<HTMLIFrameElement>) => {
-    try {
-      const iframe = e.target as HTMLIFrameElement;
-      const doc = iframe.contentDocument;
-      const body = doc?.body?.textContent || '';
-      const title = doc?.title || '';
-      if (/502|503|504|Bad Gateway|No server on that port/i.test(title + body)) {
-        if (retryCount.current < maxRetries) {
-          retryCount.current++;
-          setTimeout(() => setRetryKey(k => k + 1), 2000);
-        }
+    const poll = async () => {
+      for (let i = 0; i < maxRetries; i++) {
+        if (cancelled) return;
+        try {
+          const res = await fetch(`/proxy/${port}/`, { method: 'HEAD' });
+          if (res.ok) {
+            if (!cancelled) setReady(true);
+            return;
+          }
+        } catch {}
+        if (!cancelled) setRetryCount(i + 1);
+        await new Promise(r => setTimeout(r, 2000));
       }
-    } catch (_) { /* cross-origin = loaded successfully */ }
-  };
+    };
+    poll();
+    return () => { cancelled = true; };
+  }, [port]);
+
+  if (!ready) {
+    return (
+      <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', height: '100%', color: '#6b7280', gap: 12 }}>
+        <div className="spinner" />
+        <div>Waiting for server on port {port}… {retryCount > 0 ? `(attempt ${retryCount}/${maxRetries})` : ''}</div>
+      </div>
+    );
+  }
 
   return (
     <iframe
-      key={retryKey}
-      src={`/proxy/${port}/?r=${retryKey}`}
-      onLoad={handleLoad}
+      src={`/proxy/${port}/`}
       style={{ background: '#1a1a2e' }}
     />
   );
@@ -86,6 +99,10 @@ export default function App() {
   const [branchFrom, setBranchFrom] = useState<string | null>(null);
   const [newBranchName, setNewBranchName] = useState('');
   const [branchError, setBranchError] = useState('');
+  const [compareInfo, setCompareInfo] = useState<{ ahead: number; behind: number; defaultBranch: string } | null>(null);
+  const [prLoading, setPrLoading] = useState(false);
+  const [prResult, setPrResult] = useState<{ url: string; number: number } | null>(null);
+  const [prError, setPrError] = useState('');
 
   const activeEntry = cache.find(e => e.id === activeEntryId) || (previewPort ? cache.find(e => e.port === previewPort) : null);
 
