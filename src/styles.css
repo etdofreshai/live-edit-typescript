@@ -73,23 +73,23 @@ body {
 }
 .top-bar-btn:hover { background: var(--bg-sidebar-hover); color: var(--text-primary); }
 
-/* Top bar info — progressive overflow hiding */
+/* Top bar info — progressive overflow hiding via container queries */
 .top-bar-info {
   display: flex; align-items: center; gap: 0; min-width: 0;
-  overflow: hidden; white-space: nowrap;
+  overflow: hidden; white-space: nowrap; flex: 1;
+  container-type: inline-size;
 }
 .top-bar-info > span { flex-shrink: 0; }
 .tb-msg { flex-shrink: 1; overflow: hidden; text-overflow: ellipsis; }
 
-/* Hide items progressively as viewport shrinks */
-/* Priority: hide msg first, then owner, sha, time, repo, branch, port */
-@media (max-width: 1200px) { .tb-msg { display: none; } }
-@media (max-width: 1000px) { .tb-owner { display: none; } }
-@media (max-width: 850px)  { .tb-sha { display: none; } }
-@media (max-width: 750px)  { .tb-time { display: none; } }
-@media (max-width: 600px)  { .tb-repo { display: none; } }
-@media (max-width: 500px)  { .tb-branch { display: none; } }
-@media (max-width: 400px)  { .tb-port { display: none; } }
+/* Hide items based on container width (the info area, not viewport) */
+@container (max-width: 700px) { .tb-msg { display: none; } }
+@container (max-width: 500px) { .tb-owner { display: none; } }
+@container (max-width: 400px) { .tb-sha { display: none; } }
+@container (max-width: 320px) { .tb-time { display: none; } }
+@container (max-width: 240px) { .tb-repo { display: none; } }
+@container (max-width: 160px) { .tb-branch { display: none; } }
+@container (max-width: 100px) { .tb-port { display: none; } }
 
 /* === Main Content (below top bar) === */
 .main-content {
