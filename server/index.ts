@@ -230,5 +230,5 @@ server.listen(3000, () => {
         console.error(`[latest] poll error for ${entry.repo}/${entry.branch}:`, e.message);
       }
     }
-  }, 10_000);
+  }, 30_000);
 });
