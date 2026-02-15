@@ -289,10 +289,38 @@ export default function App() {
           <div className="list-panel">
             <div className="list-panel-scroll">
               {branches.map((b: any) => (
-                <div key={b.name}
-                  className={`list-item ${b.name === selectedBranch ? 'active' : ''}`}
-                  onClick={() => selectBranch(b.name)}>
-                  {b.name}
+                <div key={b.name}>
+                  <div
+                    className={`list-item ${b.name === selectedBranch ? 'active' : ''}`}
+                    style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}
+                    onClick={() => selectBranch(b.name)}>
+                    <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{b.name}</span>
+                    <button
+                      onClick={(e) => { e.stopPropagation(); setBranchFrom(branchFrom === b.name ? null : b.name); setNewBranchName(`${b.name}-dev`); setBranchError(''); }}
+                      style={{ background: 'none', border: 'none', color: '#6b7280', cursor: 'pointer', fontSize: 14, padding: '0 4px', flexShrink: 0, lineHeight: 1 }}
+                      title="Create branch from here"
+                    >⑂</button>
+                  </div>
+                  {branchFrom === b.name && (
+                    <div style={{ padding: '4px 8px 8px', display: 'flex', gap: 4, alignItems: 'center' }}>
+                      <input
+                        autoFocus
+                        value={newBranchName}
+                        onChange={e => setNewBranchName(e.target.value)}
+                        onKeyDown={e => { if (e.key === 'Enter' && newBranchName.trim()) handleCreateBranch(b.name, newBranchName.trim()); if (e.key === 'Escape') setBranchFrom(null); }}
+                        placeholder="new-branch-name"
+                        style={{ flex: 1, background: '#1a1a2e', border: '1px solid #3a3a5e', borderRadius: 4, color: '#cdd6f4', padding: '3px 6px', fontSize: 12, outline: 'none', minWidth: 0 }}
+                        onClick={e => e.stopPropagation()}
+                      />
+                      <button
+                        onClick={(e) => { e.stopPropagation(); if (newBranchName.trim()) handleCreateBranch(b.name, newBranchName.trim()); }}
+                        style={{ background: '#a6e3a1', color: '#1a1a2e', border: 'none', borderRadius: 4, padding: '3px 8px', fontSize: 12, cursor: 'pointer', fontWeight: 600, flexShrink: 0 }}
+                      >Create</button>
+                    </div>
+                  )}
+                  {branchFrom === b.name && branchError && (
+                    <div style={{ padding: '0 8px 6px', color: '#f38ba8', fontSize: 11 }}>{branchError}</div>
+                  )}
                 </div>
               ))}
             </div>
