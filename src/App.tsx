@@ -296,7 +296,7 @@ export default function App() {
                     onClick={() => selectBranch(b.name)}>
                     <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{b.name}</span>
                     <button
-                      onClick={(e) => { e.stopPropagation(); setBranchFrom(branchFrom === b.name ? null : b.name); setNewBranchName(`${b.name}-dev`); setBranchError(''); }}
+                      onClick={(e) => { e.stopPropagation(); setBranchFrom(branchFrom === b.name ? null : b.name); setNewBranchName(`${b.name}-dev-${crypto.randomUUID().slice(0, 6)}`); setBranchError(''); }}
                       style={{ background: 'none', border: 'none', color: '#6b7280', cursor: 'pointer', fontSize: 14, padding: '0 4px', flexShrink: 0, lineHeight: 1 }}
                       title="Create branch from here"
                     >⑂</button>
