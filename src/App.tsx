@@ -298,7 +298,17 @@ export default function App() {
           <span className={`dot ${previewPort || activeEntry?.type === 'static' ? 'green' : 'gray'}`} />
           {activeEntry ? (
             <>
-              <a href={`https://github.com/etdofreshai/${activeEntry.repo}/commit/${activeEntry.sha}`} target="_blank" rel="noopener noreferrer" style={{ color: '#89b4fa', marginRight: 6, fontFamily: 'monospace', textDecoration: 'none' }}>{activeEntry.sha.slice(0, 7)}</a>
+              <a href="https://github.com/etdofreshai" target="_blank" rel="noopener noreferrer" style={{ color: '#6b7280', textDecoration: 'none' }}>etdofreshai</a>
+              <span style={{ color: '#555', margin: '0 2px' }}>/</span>
+              <a href={`https://github.com/etdofreshai/${activeEntry.repo}`} target="_blank" rel="noopener noreferrer" style={{ color: '#cdd6f4', textDecoration: 'none' }}>{activeEntry.repo}</a>
+              {activeEntry.branch && (
+                <>
+                  <span style={{ color: '#555', margin: '0 4px' }}>@</span>
+                  <a href={`https://github.com/etdofreshai/${activeEntry.repo}/tree/${activeEntry.branch}`} target="_blank" rel="noopener noreferrer" style={{ color: '#a6e3a1', textDecoration: 'none' }}>{activeEntry.branch}</a>
+                </>
+              )}
+              <span style={{ color: '#555', margin: '0 4px' }}>·</span>
+              <a href={`https://github.com/etdofreshai/${activeEntry.repo}/commit/${activeEntry.sha}`} target="_blank" rel="noopener noreferrer" style={{ color: '#89b4fa', fontFamily: 'monospace', textDecoration: 'none' }}>{activeEntry.sha.slice(0, 7)}</a>
               {activeEntry.commitDate && (
                 <span style={{ marginRight: 6 }}>{new Date(activeEntry.commitDate).toLocaleString()}</span>
               )}
