@@ -161,7 +161,7 @@ export default function App() {
   const [prResult, setPrResult] = useState<{ url: string; number: number } | null>(null);
   const [prError, setPrError] = useState('');
   const [showEnvModal, setShowEnvModal] = useState(false);
-  const [envVars, setEnvVars] = useState<Record<string, string>>({});
+  const [envText, setEnvText] = useState('');
   const [startMode, setStartMode] = useState<StartMode>('vite');
 
   const activeEntry = cache.find(e => e.id === activeEntryId) || (previewPort ? cache.find(e => e.port === previewPort) : null);
@@ -171,9 +171,15 @@ export default function App() {
     if (selectedRepo) {
       try {
         const stored = localStorage.getItem(`env:${selectedRepo}`);
-        setEnvVars(stored ? JSON.parse(stored) : {});
+        if (stored) {
+          // Migrate old JSON format to text
+          try { const obj = JSON.parse(stored); if (typeof obj === 'object' && !Array.isArray(obj)) { setEnvText(Object.entries(obj).map(([k,v]) => `${k}=${v}`).join('\n')); return; } } catch {}
+          setEnvText(stored);
+        } else {
+          setEnvText('');
+        }
       } catch {
-        setEnvVars({});
+        setEnvText('');
       }
       try {
         const mode = localStorage.getItem(`startMode:${selectedRepo}`) as StartMode;
@@ -184,11 +190,22 @@ export default function App() {
     }
   }, [selectedRepo]);
 
-  const saveEnvVars = (vars: Record<string, string>) => {
+  const parseEnvText = (text: string): Record<string, string> => {
+    const vars: Record<string, string> = {};
+    for (const line of text.split('\n')) {
+      const trimmed = line.trim();
+      if (!trimmed || trimmed.startsWith('#')) continue;
+      const eq = trimmed.indexOf('=');
+      if (eq > 0) vars[trimmed.slice(0, eq).trim()] = trimmed.slice(eq + 1).trim();
+    }
+    return vars;
+  };
+
+  const saveEnvText = (text: string) => {
     if (!selectedRepo) return;
-    setEnvVars(vars);
+    setEnvText(text);
     try {
-      localStorage.setItem(`env:${selectedRepo}`, JSON.stringify(vars));
+      localStorage.setItem(`env:${selectedRepo}`, text);
     } catch {}
   };
 
@@ -368,7 +385,7 @@ export default function App() {
     try {
       const entry = await api('/api/run', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ repo: selectedRepo, sha, envVars, startMode }),
+        body: JSON.stringify({ repo: selectedRepo, sha, envVars: parseEnvText(envText), startMode }),
       });
       if (entry.error) { setError(entry.error); return; }
       await refreshCache();
@@ -382,7 +399,7 @@ export default function App() {
     try {
       const entry = await api('/api/run-latest', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ repo: selectedRepo, branch: selectedBranch, envVars, startMode }),
+        body: JSON.stringify({ repo: selectedRepo, branch: selectedBranch, envVars: parseEnvText(envText), startMode }),
       });
       if (entry.error) { setError(entry.error); return; }
       await refreshCache();
@@ -735,47 +752,22 @@ export default function App() {
       {showEnvModal && (
         <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.7)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000 }} onClick={() => setShowEnvModal(false)}>
           <div style={{ background: '#1a1a2e', border: '1px solid #3a3a5e', borderRadius: 12, padding: 24, width: 600, maxWidth: '90vw', maxHeight: '80vh', overflow: 'auto' }} onClick={e => e.stopPropagation()}>
-            <h3 style={{ marginTop: 0, color: '#cdd6f4' }}>Environment Variables — {selectedRepo}</h3>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginBottom: 16 }}>
-              {Object.entries(envVars).map(([key, value]) => (
-                <div key={key} style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-                  <input
-                    value={key}
-                    onChange={e => {
-                      const newVars = { ...envVars };
-                      delete newVars[key];
-                      newVars[e.target.value] = value;
-                      setEnvVars(newVars);
-                    }}
-                    placeholder="KEY"
-                    style={{ flex: 1, background: '#16161e', border: '1px solid #3a3a5e', borderRadius: 6, color: '#cdd6f4', padding: '6px 10px', fontSize: 13, outline: 'none' }}
-                  />
-                  <input
-                    value={value}
-                    onChange={e => setEnvVars({ ...envVars, [key]: e.target.value })}
-                    placeholder="value"
-                    style={{ flex: 2, background: '#16161e', border: '1px solid #3a3a5e', borderRadius: 6, color: '#cdd6f4', padding: '6px 10px', fontSize: 13, outline: 'none' }}
-                  />
-                  <button
-                    onClick={() => {
-                      const newVars = { ...envVars };
-                      delete newVars[key];
-                      setEnvVars(newVars);
-                    }}
-                    style={{ background: 'transparent', color: '#f38ba8', border: '1px solid #f38ba844', borderRadius: 6, padding: '4px 10px', cursor: 'pointer', fontSize: 13 }}
-                  >
-                    ✕
-                  </button>
-                </div>
-              ))}
-              <button
-                onClick={() => setEnvVars({ ...envVars, '': '' })}
-                style={{ background: 'transparent', color: '#a6e3a1', border: '1px solid #a6e3a144', borderRadius: 6, padding: '6px 12px', cursor: 'pointer', fontSize: 13, fontWeight: 600, alignSelf: 'flex-start' }}
-              >
-                + Add Variable
-              </button>
-            </div>
-            <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
+            <h3 style={{ marginTop: 0, color: '#cdd6f4' }}>.env — {selectedRepo}</h3>
+            <p style={{ color: '#6b7280', fontSize: 12, margin: '0 0 12px' }}>One variable per line: <code style={{ color: '#89b4fa' }}>KEY=value</code>. Lines starting with <code style={{ color: '#6b7280' }}>#</code> are comments.</p>
+            <textarea
+              value={envText}
+              onChange={e => setEnvText(e.target.value)}
+              placeholder={"# Database\nDATABASE_URL=postgresql://...\n\n# Ports\nBACKEND_PORT=3001"}
+              spellCheck={false}
+              style={{
+                width: '100%', minHeight: 250, background: '#16161e', border: '1px solid #3a3a5e',
+                borderRadius: 8, color: '#cdd6f4', padding: '12px 14px', fontSize: 13,
+                fontFamily: '"JetBrains Mono", "Fira Code", "Cascadia Code", monospace',
+                lineHeight: 1.6, resize: 'vertical', outline: 'none', boxSizing: 'border-box',
+                tabSize: 2,
+              }}
+            />
+            <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end', marginTop: 12 }}>
               <button
                 onClick={() => setShowEnvModal(false)}
                 style={{ background: 'transparent', color: '#6b7280', border: '1px solid #3a3a5e', borderRadius: 6, padding: '6px 16px', cursor: 'pointer', fontSize: 13 }}
@@ -783,12 +775,7 @@ export default function App() {
                 Cancel
               </button>
               <button
-                onClick={() => {
-                  // Remove empty keys
-                  const cleaned = Object.fromEntries(Object.entries(envVars).filter(([k]) => k.trim()));
-                  saveEnvVars(cleaned);
-                  setShowEnvModal(false);
-                }}
+                onClick={() => { saveEnvText(envText); setShowEnvModal(false); }}
                 style={{ background: '#a6e3a1', color: '#1a1a2e', border: 'none', borderRadius: 6, padding: '6px 20px', cursor: 'pointer', fontSize: 13, fontWeight: 600 }}
               >
                 Save
