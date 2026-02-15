@@ -179,6 +179,7 @@ export default function App() {
   const [showEnvModal, setShowEnvModal] = useState(false);
   const [showLogModal, setShowLogModal] = useState(false);
   const [logContent, setLogContent] = useState('');
+  const [showHeader, setShowHeader] = useState(true);
   const [envText, setEnvText] = useState('');
   const [startMode, setStartMode] = useState<StartMode>('vite');
 
@@ -626,7 +627,14 @@ export default function App() {
       </div>
 
       <div className="preview-area">
-        <div className="preview-header">
+        {!showHeader && (
+          <button
+            onClick={() => setShowHeader(true)}
+            style={{ position: 'absolute', top: 6, right: 6, zIndex: 20, background: 'rgba(26,26,46,0.8)', color: '#6b7280', border: '1px solid #3a3a5e', borderRadius: 6, padding: '2px 8px', cursor: 'pointer', fontSize: 12 }}
+            title="Show header"
+          >▼</button>
+        )}
+        {showHeader && <div className="preview-header">
           <span className={`dot ${previewPort || activeEntry?.type === 'static' ? 'green' : 'gray'}`} />
           {activeEntry ? (
             <>
@@ -679,8 +687,13 @@ export default function App() {
               </span>
             </>
           ) : 'No preview'}
-        </div>
-        <div className="preview-body">
+          <button
+            onClick={() => setShowHeader(false)}
+            style={{ background: 'transparent', color: '#6b7280', border: '1px solid #3a3a5e', borderRadius: 6, padding: '2px 8px', cursor: 'pointer', fontSize: 12, marginLeft: 4 }}
+            title="Hide header"
+          >▲</button>
+        </div>}
+        <div className="preview-body" style={{ position: 'relative' }}>
           {loading && (
             <div className="loading-overlay">
               <span className="spinner spinner-large" />
