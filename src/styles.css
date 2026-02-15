@@ -81,8 +81,9 @@ body {
 /* === Sidebar === */
 .sidebar {
   width: 380px; flex-shrink: 0; background: var(--bg-sidebar);
-  border-right: 1px solid var(--border); overflow-y: auto;
+  border-left: 1px solid var(--border); overflow-y: auto;
   padding: 16px; transition: width 0.2s ease, opacity 0.2s ease;
+  order: 1;
 }
 .sidebar.collapsed { width: 0; opacity: 0; overflow: hidden; padding: 0; }
 
