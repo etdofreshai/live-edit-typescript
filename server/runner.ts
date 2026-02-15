@@ -32,6 +32,14 @@ export async function cloneAndStart(repo: string, sha: string, port: number, opt
   // Install deps
   execSync('npm install', { cwd: dir, stdio: 'pipe', timeout: 120_000 });
 
+  // Check if this project actually uses Vite
+  const pkgJson = JSON.parse(readFileSync(path.join(dir, 'package.json'), 'utf-8'));
+  const allDeps = { ...pkgJson.dependencies, ...pkgJson.devDependencies };
+  if (!allDeps['vite']) {
+    // Not a Vite project — treat as static
+    return { dir, pid: 0, type: 'static' };
+  }
+
   // Verify vite is actually usable (npm install can silently produce incomplete installs)
   const viteCli = path.join(dir, 'node_modules', 'vite', 'dist', 'node', 'cli.js');
   if (!existsSync(viteCli)) {
