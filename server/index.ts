@@ -85,15 +85,47 @@ app.delete('/api/cache/:id', async (req, res) => {
 });
 
 // Proxy /proxy/:port/* to target Vite dev servers
-// Strip /proxy/:port prefix before forwarding
+// Strip /proxy/:port prefix and inject <base> tag so absolute paths resolve correctly
 app.use('/proxy/:port', (req, res) => {
   const port = parseInt(req.params.port);
   if (!port || !getEntryByPort(port)) {
     return res.status(404).json({ error: 'No server on that port' });
   }
-  // Strip the /proxy/{port} prefix
   req.url = req.url || '/';
-  proxy.web(req, res, { target: `http://localhost:${port}` });
+
+  // For HTML requests (initial page load), intercept and inject <base> tag
+  const isHtmlRequest = req.url === '/' || req.url === '/index.html' || req.headers.accept?.includes('text/html');
+  if (isHtmlRequest && req.method === 'GET') {
+    // Make a sub-request to the target
+    const targetReq = http.request({
+      hostname: 'localhost',
+      port,
+      path: req.url,
+      method: 'GET',
+      headers: { ...req.headers, host: `localhost:${port}` },
+    }, (targetRes) => {
+      const chunks: Buffer[] = [];
+      targetRes.on('data', (chunk: Buffer) => chunks.push(chunk));
+      targetRes.on('end', () => {
+        let body = Buffer.concat(chunks).toString();
+        // Inject <base> tag so /src/main.ts resolves to /proxy/{port}/src/main.ts
+        if (body.includes('<head>')) {
+          body = body.replace('<head>', `<head><base href="/proxy/${port}/">`);
+        }
+        res.writeHead(targetRes.statusCode || 200, {
+          ...targetRes.headers,
+          'content-length': Buffer.byteLength(body),
+        });
+        res.end(body);
+      });
+    });
+    targetReq.on('error', (err) => {
+      res.status(502).json({ error: err.message });
+    });
+    targetReq.end();
+  } else {
+    proxy.web(req, res, { target: `http://localhost:${port}` });
+  }
 });
 
 const server = http.createServer(app);
