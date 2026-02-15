@@ -254,7 +254,6 @@ export default function App() {
     } else {
       setPreviewPort(entry.port);
     }
-    setSidebarOpen(false);
   };
 
   const viewFile = async (cacheId: string, filePath: string) => {
@@ -411,7 +410,7 @@ export default function App() {
   };
 
   const run = async (sha: string) => {
-    setLoading(sha); setError('');
+    setLoading(sha); setError(''); setSidebarOpen(false);
     try {
       const entry = await api('/api/run', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
@@ -425,7 +424,7 @@ export default function App() {
   };
 
   const runLatest = async () => {
-    setLoading('latest'); setError('');
+    setLoading('latest'); setError(''); setSidebarOpen(false);
     try {
       const entry = await api('/api/run-latest', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
