@@ -237,7 +237,36 @@ export default function App() {
 
   const selectBranch = async (branch: string) => {
     setSelectedBranch(branch);
-    setCommits(await api(`/api/repos/${selectedRepo}/branches/${encodeURIComponent(branch)}/commits`));
+    setPrResult(null);
+    setPrError('');
+    setCompareInfo(null);
+    const [commitList, cmp] = await Promise.all([
+      api(`/api/repos/${selectedRepo}/branches/${encodeURIComponent(branch)}/commits`),
+      api(`/api/repos/${selectedRepo}/branches/${encodeURIComponent(branch)}/compare`).catch(() => null),
+    ]);
+    setCommits(commitList);
+    if (cmp && !cmp.error) setCompareInfo(cmp);
+  };
+
+  const handleCreatePR = async () => {
+    if (!compareInfo || !selectedBranch || !selectedRepo) return;
+    setPrLoading(true);
+    setPrError('');
+    setPrResult(null);
+    try {
+      const res = await api(`/api/repos/${selectedRepo}/pulls`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          head: selectedBranch,
+          base: compareInfo.defaultBranch,
+          title: `Merge ${selectedBranch} into ${compareInfo.defaultBranch}`,
+        }),
+      });
+      if (res.error) { setPrError(res.error); return; }
+      setPrResult(res);
+    } catch (e: any) { setPrError(e.message); }
+    finally { setPrLoading(false); }
   };
 
   const run = async (sha: string) => {
@@ -345,7 +374,32 @@ export default function App() {
         </>}
 
         {commits.length > 0 && <>
-          <h3>Commits — {selectedBranch}</h3>
+          <h3 style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+            <span>Commits — {selectedBranch}</span>
+            {compareInfo && compareInfo.ahead > 0 && (
+              <span style={{ fontSize: 11, background: '#89b4fa22', color: '#89b4fa', padding: '2px 8px', borderRadius: 10, fontWeight: 500 }}>
+                {compareInfo.ahead} ahead
+              </span>
+            )}
+            {compareInfo && compareInfo.ahead > 0 && !prResult && (
+              <button
+                onClick={handleCreatePR}
+                disabled={prLoading}
+                style={{ fontSize: 11, background: '#a6e3a122', color: '#a6e3a1', border: '1px solid #a6e3a144', borderRadius: 6, padding: '2px 10px', cursor: 'pointer', fontWeight: 600 }}
+              >
+                {prLoading ? '…' : `🔀 PR → ${compareInfo.defaultBranch}`}
+              </button>
+            )}
+            {prResult && (
+              <a href={prResult.url} target="_blank" rel="noopener noreferrer"
+                style={{ fontSize: 11, color: '#a6e3a1', textDecoration: 'none' }}>
+                ✓ PR #{prResult.number}
+              </a>
+            )}
+            {prError && (
+              <span style={{ fontSize: 11, color: '#f38ba8' }}>{prError.slice(0, 80)}</span>
+            )}
+          </h3>
           <div className="list-panel">
             <div className="list-panel-scroll tall">
               <div className="latest-entry">
