@@ -290,14 +290,17 @@ app.post('/api/voice', upload.single('audio'), async (req, res) => {
 
     console.log('[voice] Transcribed:', transcript);
 
-    // Step 2: Send transcript to OpenClaw gateway
-    const gatewayResponse = await fetch(`${OPENCLAW_GATEWAY_URL}/api/v1/chat`, {
+    // Step 2: Send transcript to OpenClaw gateway (OpenAI-compatible endpoint)
+    const gatewayResponse = await fetch(`${OPENCLAW_GATEWAY_URL}/v1/chat/completions`, {
       method: 'POST',
       headers: {
         'Authorization': `Bearer ${OPENCLAW_GATEWAY_TOKEN}`,
         'Content-Type': 'application/json',
       },
-      body: JSON.stringify({ message: transcript }),
+      body: JSON.stringify({
+        model: 'openclaw:main',
+        messages: [{ role: 'user', content: transcript }],
+      }),
     });
 
     if (!gatewayResponse.ok) {
