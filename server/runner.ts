@@ -32,6 +32,18 @@ export async function cloneAndStart(repo: string, sha: string, port: number, opt
   // Install deps
   execSync('npm install', { cwd: dir, stdio: 'pipe', timeout: 120_000 });
 
+  // Verify vite is actually usable (npm install can silently produce incomplete installs)
+  const viteCli = path.join(dir, 'node_modules', 'vite', 'dist', 'node', 'cli.js');
+  if (!existsSync(viteCli)) {
+    // Nuke node_modules and retry once
+    console.warn(`[runner] Vite dist missing in ${dir}, retrying install...`);
+    rmSync(path.join(dir, 'node_modules'), { recursive: true, force: true });
+    execSync('npm install', { cwd: dir, stdio: 'pipe', timeout: 120_000 });
+    if (!existsSync(viteCli)) {
+      throw new Error(`Vite install incomplete — ${viteCli} still missing after retry`);
+    }
+  }
+
   const hmrEnabled = !!opts?.isLatest;
 
   // Start vite with --base flag; project's own vite.config is preserved
