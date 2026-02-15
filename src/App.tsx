@@ -417,8 +417,17 @@ export default function App() {
             {repos.map((r: any) => (
               <div key={r.name}
                 className={`list-item ${r.name === selectedRepo ? 'active' : ''}`}
+                style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}
                 onClick={() => selectRepo(r.name)}>
-                {r.name}
+                <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{r.name}</span>
+                <a
+                  href={`https://github.com/etdofreshai/${r.name}`}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  onClick={e => e.stopPropagation()}
+                  style={{ color: '#6b7280', fontSize: 11, textDecoration: 'none', flexShrink: 0, padding: '0 4px' }}
+                  title="View on GitHub"
+                >↗</a>
               </div>
             ))}
           </div>
@@ -435,11 +444,21 @@ export default function App() {
                     style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}
                     onClick={() => selectBranch(b.name)}>
                     <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{b.name}</span>
-                    <button
-                      onClick={(e) => { e.stopPropagation(); setBranchFrom(branchFrom === b.name ? null : b.name); setNewBranchName(`${b.name}-dev-${crypto.randomUUID().slice(0, 6)}`); setBranchError(''); }}
-                      style={{ background: 'none', border: 'none', color: '#6b7280', cursor: 'pointer', fontSize: 14, padding: '0 4px', flexShrink: 0, lineHeight: 1 }}
-                      title="Create branch from here"
-                    >⑂</button>
+                    <div style={{ display: 'flex', gap: 2, flexShrink: 0 }}>
+                      <a
+                        href={`https://github.com/etdofreshai/${selectedRepo}/tree/${b.name}`}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        onClick={e => e.stopPropagation()}
+                        style={{ color: '#6b7280', fontSize: 11, textDecoration: 'none', padding: '0 4px' }}
+                        title="View on GitHub"
+                      >↗</a>
+                      <button
+                        onClick={(e) => { e.stopPropagation(); setBranchFrom(branchFrom === b.name ? null : b.name); setNewBranchName(`${b.name}-dev-${crypto.randomUUID().slice(0, 6)}`); setBranchError(''); }}
+                        style={{ background: 'none', border: 'none', color: '#6b7280', cursor: 'pointer', fontSize: 14, padding: '0 4px', flexShrink: 0, lineHeight: 1 }}
+                        title="Create branch from here"
+                      >⑂</button>
+                    </div>
                   </div>
                   {branchFrom === b.name && (
                     <div style={{ padding: '4px 8px 8px', display: 'flex', gap: 4, alignItems: 'center' }}>
@@ -522,7 +541,16 @@ export default function App() {
               {commits.map((c: any) => (
                 <div key={c.sha} className="commit-item">
                   <div className="commit-info">
-                    <div className="commit-sha">{c.sha.slice(0, 7)}</div>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+                      <div className="commit-sha">{c.sha.slice(0, 7)}</div>
+                      <a
+                        href={`https://github.com/etdofreshai/${selectedRepo}/commit/${c.sha}`}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        style={{ color: '#6b7280', fontSize: 10, textDecoration: 'none' }}
+                        title="View on GitHub"
+                      >↗</a>
+                    </div>
                     <div className="commit-msg">{c.commit?.message?.split('\n')[0]}</div>
                   </div>
                   <button className="btn-run" onClick={() => run(c.sha)} disabled={!!loading}>
@@ -537,11 +565,18 @@ export default function App() {
         <h3>Cache ({cache.length}/10)</h3>
         {cache.map(e => (
           <div key={e.id} className="cache-card">
-            <div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
               <span className="cache-repo">{e.repo}</span>
               <code className="cache-sha">{e.sha.slice(0, 7)}</code>
+              <a
+                href={`https://github.com/etdofreshai/${e.repo}/commit/${e.sha}`}
+                target="_blank"
+                rel="noopener noreferrer"
+                style={{ color: '#6b7280', fontSize: 10, textDecoration: 'none' }}
+                title="View on GitHub"
+              >↗</a>
               {e.type !== 'static' && <span className="cache-port">:{e.port}</span>}
-              {e.type === 'static' && <span style={{ marginLeft: 8, color: '#6b7280', fontSize: 11 }}>static</span>}
+              {e.type === 'static' && <span style={{ color: '#6b7280', fontSize: 11 }}>static</span>}
               {e.isLatest && <span className="cache-badge">latest · {e.branch}</span>}
             </div>
             <div>
@@ -559,15 +594,24 @@ export default function App() {
             <>
               <a href="https://github.com/etdofreshai" target="_blank" rel="noopener noreferrer" style={{ color: '#6b7280', textDecoration: 'none' }}>etdofreshai</a>
               <span style={{ color: '#555', margin: '0 2px' }}>/</span>
-              <a href={`https://github.com/etdofreshai/${activeEntry.repo}`} target="_blank" rel="noopener noreferrer" style={{ color: '#cdd6f4', textDecoration: 'none' }}>{activeEntry.repo}</a>
+              <a href={`https://github.com/etdofreshai/${activeEntry.repo}`} target="_blank" rel="noopener noreferrer" style={{ color: '#cdd6f4', textDecoration: 'none', display: 'inline-flex', alignItems: 'center', gap: 3 }}>
+                {activeEntry.repo}
+                <span style={{ fontSize: 10, color: '#6b7280' }}>↗</span>
+              </a>
               {activeEntry.branch && (
                 <>
                   <span style={{ color: '#555', margin: '0 4px' }}>@</span>
-                  <a href={`https://github.com/etdofreshai/${activeEntry.repo}/tree/${activeEntry.branch}`} target="_blank" rel="noopener noreferrer" style={{ color: '#a6e3a1', textDecoration: 'none' }}>{activeEntry.branch}</a>
+                  <a href={`https://github.com/etdofreshai/${activeEntry.repo}/tree/${activeEntry.branch}`} target="_blank" rel="noopener noreferrer" style={{ color: '#a6e3a1', textDecoration: 'none', display: 'inline-flex', alignItems: 'center', gap: 3 }}>
+                    {activeEntry.branch}
+                    <span style={{ fontSize: 10, color: '#6b7280' }}>↗</span>
+                  </a>
                 </>
               )}
               <span style={{ color: '#555', margin: '0 4px' }}>·</span>
-              <a href={`https://github.com/etdofreshai/${activeEntry.repo}/commit/${activeEntry.sha}`} target="_blank" rel="noopener noreferrer" style={{ color: '#89b4fa', fontFamily: 'monospace', textDecoration: 'none' }}>{activeEntry.sha.slice(0, 7)}</a>
+              <a href={`https://github.com/etdofreshai/${activeEntry.repo}/commit/${activeEntry.sha}`} target="_blank" rel="noopener noreferrer" style={{ color: '#89b4fa', fontFamily: 'monospace', textDecoration: 'none', display: 'inline-flex', alignItems: 'center', gap: 3 }}>
+                {activeEntry.sha.slice(0, 7)}
+                <span style={{ fontSize: 10, color: '#6b7280' }}>↗</span>
+              </a>
               {activeEntry.commitDate && (
                 <span style={{ marginRight: 6 }}>{new Date(activeEntry.commitDate).toLocaleString()}</span>
               )}
