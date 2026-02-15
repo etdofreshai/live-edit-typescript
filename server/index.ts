@@ -92,7 +92,7 @@ app.get('/api/cache', (_req, res) => {
 });
 
 app.post('/api/run', async (req, res) => {
-  const { repo, sha } = req.body;
+  const { repo, sha, envVars, startMode } = req.body;
   if (!repo || !sha) return res.status(400).json({ error: 'repo and sha required' });
 
   const existing = getEntry(repo, sha);
@@ -105,7 +105,7 @@ app.post('/api/run', async (req, res) => {
 
   try {
     const [{ dir, pid, type }, commitInfo] = await Promise.all([
-      cloneAndStart(repo, sha, port),
+      cloneAndStart(repo, sha, port, { envVars, startMode }),
       getCommit(repo, sha).catch(() => ({ message: '', date: '' })),
     ]);
     const entry = {
@@ -128,7 +128,7 @@ app.post('/api/run', async (req, res) => {
 });
 
 app.post('/api/run-latest', async (req, res) => {
-  const { repo, branch } = req.body;
+  const { repo, branch, envVars, startMode } = req.body;
   if (!repo || !branch) return res.status(400).json({ error: 'repo and branch required' });
 
   try {
@@ -146,7 +146,7 @@ app.post('/api/run-latest', async (req, res) => {
     if (!port) return res.status(503).json({ error: 'No ports available' });
 
     const [{ dir, pid, type }, commitInfo] = await Promise.all([
-      cloneAndStart(repo, sha, port, { branch, isLatest: true }),
+      cloneAndStart(repo, sha, port, { branch, isLatest: true, envVars, startMode }),
       getCommit(repo, sha).catch(() => ({ message: '', date: '' })),
     ]);
     const entry = {
@@ -218,7 +218,7 @@ app.get('/api/cache/:id/files/*', (req, res) => {
   const entry = getEntryById(req.params.id);
   if (!entry) return res.status(404).json({ error: 'Not found' });
 
-  const filePath = req.params[0];
+  const filePath = (req.params as any)[0] as string;
   const fullPath = pathModule.join(entry.dir, filePath);
 
   // Prevent path traversal

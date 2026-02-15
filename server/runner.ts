@@ -1,5 +1,5 @@
 import { execSync, spawn } from 'child_process';
-import { existsSync, rmSync, readFileSync, openSync, closeSync } from 'fs';
+import { existsSync, rmSync, readFileSync, openSync, closeSync, writeFileSync } from 'fs';
 import path from 'path';
 import type { CacheEntry } from './cache-manager.js';
 import { OWNER } from './github.js';
@@ -10,7 +10,17 @@ export function getTargetDir(repo: string, sha: string): string {
   return path.join(TARGETS_DIR, `${repo}-${sha.slice(0, 7)}`);
 }
 
-export async function cloneAndStart(repo: string, sha: string, port: number, opts?: { branch?: string; isLatest?: boolean }): Promise<{ dir: string; pid: number; type: 'vite' | 'static' }> {
+export async function cloneAndStart(
+  repo: string,
+  sha: string,
+  port: number,
+  opts?: {
+    branch?: string;
+    isLatest?: boolean;
+    envVars?: Record<string, string>;
+    startMode?: 'vite' | 'npm-dev';
+  }
+): Promise<{ dir: string; pid: number; type: 'vite' | 'static' }> {
   const dir = getTargetDir(repo, sha);
 
   if (!existsSync(dir)) {
@@ -27,6 +37,14 @@ export async function cloneAndStart(repo: string, sha: string, port: number, opt
   // Check if package.json exists — if not, this is a static repo
   if (!existsSync(path.join(dir, 'package.json'))) {
     return { dir, pid: 0, type: 'static' };
+  }
+
+  // Write .env file if env vars provided
+  if (opts?.envVars && Object.keys(opts.envVars).length > 0) {
+    const envContent = Object.entries(opts.envVars)
+      .map(([key, value]) => `${key}=${value}`)
+      .join('\n');
+    writeFileSync(path.join(dir, '.env'), envContent, 'utf-8');
   }
 
   // Install deps
@@ -53,20 +71,44 @@ export async function cloneAndStart(repo: string, sha: string, port: number, opt
   }
 
   const hmrEnabled = !!opts?.isLatest;
+  const startMode = opts?.startMode || 'vite';
 
-  // Start vite with --base flag; project's own vite.config is preserved
-  const args = ['vite', '--port', String(port), '--host', '0.0.0.0', '--strictPort', '--base', `/proxy/${port}/`];
+  // Build env vars to pass to the process
+  const processEnv = {
+    ...process.env,
+    PORT: String(port),
+    HOST: '0.0.0.0',
+    BASE: `/proxy/${port}/`,
+    VITE_PORT: String(port),
+    VITE_HOST: '0.0.0.0',
+    VITE_BASE: `/proxy/${port}/`,
+    ...(opts?.envVars || {}),
+  };
 
   // Capture stdout/stderr to a log file for debugging
   const logPath = path.join(dir, '.vite-server.log');
   const logFd = openSync(logPath, 'w');
 
-  const child = spawn('npx', args, {
-    cwd: dir,
-    stdio: ['ignore', logFd, logFd],
-    detached: true,
-    env: { ...process.env, PORT: String(port) },
-  });
+  let child;
+  if (startMode === 'npm-dev') {
+    // Use npm run dev
+    child = spawn('npm', ['run', 'dev'], {
+      cwd: dir,
+      stdio: ['ignore', logFd, logFd],
+      detached: true,
+      env: processEnv,
+    });
+  } else {
+    // Use npx vite with flags (default, most reliable)
+    const args = ['vite', '--port', String(port), '--host', '0.0.0.0', '--strictPort', '--base', `/proxy/${port}/`];
+    child = spawn('npx', args, {
+      cwd: dir,
+      stdio: ['ignore', logFd, logFd],
+      detached: true,
+      env: processEnv,
+    });
+  }
+
   child.unref();
   child.on('exit', () => {
     try { closeSync(logFd); } catch {}
