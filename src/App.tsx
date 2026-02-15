@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from 'react';
+import './styles.css';
 
 interface CacheEntry {
   id: string; repo: string; sha: string; port: number; lastAccessed: number;
@@ -6,14 +7,6 @@ interface CacheEntry {
 }
 
 const api = (path: string, opts?: RequestInit) => fetch(path, opts).then(r => r.json());
-
-const spinnerCSS = `
-@keyframes spin { to { transform: rotate(360deg); } }
-@keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.4; } }
-.spinner { display: inline-block; width: 16px; height: 16px; border: 2px solid #ccc; border-top-color: #333; border-radius: 50%; animation: spin 0.6s linear infinite; }
-.spinner-large { width: 32px; height: 32px; border-width: 3px; border-top-color: #4f46e5; }
-.loading-pulse { animation: pulse 1.5s ease-in-out infinite; }
-`;
 
 export default function App() {
   const [repos, setRepos] = useState<any[]>([]);
@@ -71,7 +64,6 @@ export default function App() {
     finally { setLoading(''); }
   };
 
-  // Auto-refresh cache to see updated SHAs for latest entries
   useEffect(() => {
     const interval = setInterval(refreshCache, 5000);
     return () => clearInterval(interval);
@@ -83,105 +75,108 @@ export default function App() {
   };
 
   return (
-    <div style={{ fontFamily: 'system-ui', padding: 20, display: 'flex', gap: 20, height: '100vh', boxSizing: 'border-box' }}>
-      <style>{spinnerCSS}</style>
-      <button onClick={() => setSidebarOpen(o => !o)} style={{
-        position: 'fixed', top: 10, left: 10, zIndex: 100, width: 36, height: 36,
-        border: '1px solid #ddd', borderRadius: 6, background: 'white', cursor: 'pointer',
-        fontSize: 18, display: 'flex', alignItems: 'center', justifyContent: 'center',
-        boxShadow: '0 1px 3px rgba(0,0,0,0.1)'
-      }}>{sidebarOpen ? '✕' : '☰'}</button>
-      <div style={{
-        width: sidebarOpen ? 400 : 0, flexShrink: 0, overflow: sidebarOpen ? 'auto' : 'hidden',
-        transition: 'width 0.2s ease', opacity: sidebarOpen ? 1 : 0,
-        paddingLeft: sidebarOpen ? 0 : 0, marginTop: 30
-      }}>
+    <div className="app-container">
+      <button className="sidebar-toggle" onClick={() => setSidebarOpen(o => !o)}>
+        {sidebarOpen ? '✕' : '☰'}
+      </button>
+
+      <div className={`sidebar ${sidebarOpen ? '' : 'collapsed'}`}>
         <h2>Live Edit TypeScript</h2>
-        {error && <div style={{ color: 'red', marginBottom: 10 }}>{error}</div>}
+        {error && <div className="error-banner">{error}</div>}
 
         <h3>Repos</h3>
-        <div style={{ maxHeight: 200, overflow: 'auto', border: '1px solid #ddd', borderRadius: 4 }}>
-          {repos.map((r: any) => (
-            <div key={r.name} onClick={() => selectRepo(r.name)}
-              style={{ padding: '6px 10px', cursor: 'pointer', background: r.name === selectedRepo ? '#e0e7ff' : '' }}>
-              {r.name}
-            </div>
-          ))}
+        <div className="list-panel">
+          <div className="list-panel-scroll">
+            {repos.map((r: any) => (
+              <div key={r.name}
+                className={`list-item ${r.name === selectedRepo ? 'active' : ''}`}
+                onClick={() => selectRepo(r.name)}>
+                {r.name}
+              </div>
+            ))}
+          </div>
         </div>
 
         {branches.length > 0 && <>
           <h3>Branches — {selectedRepo}</h3>
-          <div style={{ maxHeight: 150, overflow: 'auto', border: '1px solid #ddd', borderRadius: 4 }}>
-            {branches.map((b: any) => (
-              <div key={b.name} onClick={() => selectBranch(b.name)}
-                style={{ padding: '6px 10px', cursor: 'pointer', background: b.name === selectedBranch ? '#e0e7ff' : '' }}>
-                {b.name}
-              </div>
-            ))}
+          <div className="list-panel">
+            <div className="list-panel-scroll">
+              {branches.map((b: any) => (
+                <div key={b.name}
+                  className={`list-item ${b.name === selectedBranch ? 'active' : ''}`}
+                  onClick={() => selectBranch(b.name)}>
+                  {b.name}
+                </div>
+              ))}
+            </div>
           </div>
         </>}
 
         {commits.length > 0 && <>
           <h3>Commits — {selectedBranch}</h3>
-          <div style={{ maxHeight: 300, overflow: 'auto', border: '1px solid #ddd', borderRadius: 4 }}>
-            <div style={{ padding: '6px 10px', borderBottom: '2px solid #059669', display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: '#ecfdf5' }}>
-              <div style={{ flex: 1 }}>
-                <div style={{ fontWeight: 'bold', color: '#059669' }}>▶ Latest</div>
-                <div style={{ fontSize: 12, color: '#666' }}>Track {selectedBranch} — auto-updates on new commits</div>
-              </div>
-              <button onClick={runLatest} disabled={!!loading}
-                style={{ marginLeft: 8, padding: '4px 10px', cursor: 'pointer', background: '#059669', color: 'white', border: 'none', borderRadius: 4 }}>
-                {loading === 'latest' ? <span className="spinner" /> : '▶ Run'}
-              </button>
-            </div>
-            {commits.map((c: any) => (
-              <div key={c.sha} style={{ padding: '6px 10px', borderBottom: '1px solid #eee', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                <div style={{ flex: 1, minWidth: 0 }}>
-                  <div style={{ fontSize: 12, color: '#666' }}>{c.sha.slice(0, 7)}</div>
-                  <div style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{c.commit?.message?.split('\n')[0]}</div>
+          <div className="list-panel">
+            <div className="list-panel-scroll tall">
+              <div className="latest-entry">
+                <div className="commit-info">
+                  <div className="latest-label">▶ Latest</div>
+                  <div className="latest-desc">Track {selectedBranch} — auto-updates on new commits</div>
                 </div>
-                <button onClick={() => run(c.sha)} disabled={!!loading}
-                  style={{ marginLeft: 8, padding: '4px 10px', cursor: 'pointer' }}>
-                  {loading === c.sha ? <span className="spinner" /> : '▶ Run'}
+                <button className="btn-run green" onClick={runLatest} disabled={!!loading}>
+                  {loading === 'latest' ? <span className="spinner" /> : '▶ Run'}
                 </button>
               </div>
-            ))}
+              {commits.map((c: any) => (
+                <div key={c.sha} className="commit-item">
+                  <div className="commit-info">
+                    <div className="commit-sha">{c.sha.slice(0, 7)}</div>
+                    <div className="commit-msg">{c.commit?.message?.split('\n')[0]}</div>
+                  </div>
+                  <button className="btn-run" onClick={() => run(c.sha)} disabled={!!loading}>
+                    {loading === c.sha ? <span className="spinner" /> : '▶ Run'}
+                  </button>
+                </div>
+              ))}
+            </div>
           </div>
         </>}
 
         <h3>Cache ({cache.length}/10)</h3>
         {cache.map(e => (
-          <div key={e.id} style={{ padding: '6px 10px', border: '1px solid #ddd', borderRadius: 4, marginBottom: 4, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+          <div key={e.id} className="cache-card">
             <div>
-              <strong>{e.repo}</strong> <code>{e.sha.slice(0, 7)}</code>
-              <span style={{ marginLeft: 8, color: '#059669' }}>:{e.port}</span>
-              {e.isLatest && <span style={{ marginLeft: 6, background: '#059669', color: 'white', padding: '1px 6px', borderRadius: 8, fontSize: 11 }}>latest · {e.branch}</span>}
+              <span className="cache-repo">{e.repo}</span>
+              <code className="cache-sha">{e.sha.slice(0, 7)}</code>
+              <span className="cache-port">:{e.port}</span>
+              {e.isLatest && <span className="cache-badge">latest · {e.branch}</span>}
             </div>
             <div>
-              <button onClick={() => { setPreviewPort(e.port); setSidebarOpen(false); }} style={{ marginRight: 4, cursor: 'pointer' }}>👁</button>
-              <button onClick={() => remove(e.id)} style={{ cursor: 'pointer' }}>✕</button>
+              <button className="btn-icon" onClick={() => { setPreviewPort(e.port); setSidebarOpen(false); }}>👁</button>
+              <button className="btn-icon danger" onClick={() => remove(e.id)}>✕</button>
             </div>
           </div>
         ))}
       </div>
 
-      <div style={{ flex: 1, border: '1px solid #ddd', borderRadius: 4, overflow: 'hidden', position: 'relative' }}>
-        {loading && (
-          <div style={{
-            position: 'absolute', inset: 0, zIndex: 10, background: 'rgba(255,255,255,0.85)',
-            display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 12
-          }}>
-            <span className="spinner spinner-large" />
-            <div className="loading-pulse" style={{ color: '#4f46e5', fontWeight: 500 }}>Starting server… this may take a minute</div>
-          </div>
-        )}
-        {previewPort ? (
-          <iframe src={`/proxy/${previewPort}/`} style={{ width: '100%', height: '100%', border: 'none' }} />
-        ) : (
-          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%', color: '#999' }}>
-            Select a commit and click Run to preview
-          </div>
-        )}
+      <div className="preview-area">
+        <div className="preview-header">
+          <span className={`dot ${previewPort ? 'green' : 'gray'}`} />
+          {previewPort ? `Preview — port ${previewPort}` : 'No preview'}
+        </div>
+        <div className="preview-body">
+          {loading && (
+            <div className="loading-overlay">
+              <span className="spinner spinner-large" />
+              <div className="loading-text loading-pulse">Starting server… this may take a minute</div>
+            </div>
+          )}
+          {previewPort ? (
+            <iframe src={`/proxy/${previewPort}/`} />
+          ) : (
+            <div className="preview-placeholder">
+              Select a commit and click Run to preview
+            </div>
+          )}
+        </div>
       </div>
     </div>
   );
