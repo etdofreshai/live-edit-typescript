@@ -299,7 +299,7 @@ app.post('/api/voice/send', async (req, res) => {
       body: JSON.stringify({
         model: 'openclaw:main',
         messages: [{ role: 'user', content: context?.repo
-          ? `[Live Edit: ${context.owner || 'etdofreshai'}/${context.repo}${context.branch ? ` @ ${context.branch}` : ''}${context.sha ? ` (${context.sha.slice(0, 7)})` : ''}]\n\n${text}`
+          ? `[Live Edit: ${context.owner || 'etdofreshai'}/${context.repo}${context.branch ? ` @ ${context.branch}` : ''}${context.sha ? ` (${context.sha.slice(0, 7)})` : ''}]\n[If you make changes, commit and push to the repo.]\n\n${text}`
           : text
         }],
       }),
