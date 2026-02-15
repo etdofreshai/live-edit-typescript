@@ -439,10 +439,54 @@ export default function App() {
 
   return (
     <div className="app-container">
-      <button className="sidebar-toggle" onClick={() => setSidebarOpen(o => !o)}>
-        {sidebarOpen ? '✕' : '☰'}
-      </button>
+      {showHeader && (
+        <div className="top-bar">
+          <span className={`dot ${previewPort || activeEntry?.type === 'static' ? 'green' : 'gray'}`} />
+          {activeEntry ? (
+            <>
+              <a href="https://github.com/etdofreshai" target="_blank" rel="noopener noreferrer" style={{ color: '#6b7280', textDecoration: 'none' }}>etdofreshai</a>
+              <span style={{ color: '#555', margin: '0 2px' }}>/</span>
+              <a href={`https://github.com/etdofreshai/${activeEntry.repo}`} target="_blank" rel="noopener noreferrer" style={{ color: '#cdd6f4', textDecoration: 'none' }}>{activeEntry.repo}</a>
+              {activeEntry.branch && (
+                <>
+                  <span style={{ color: '#555', margin: '0 4px' }}>@</span>
+                  <a href={`https://github.com/etdofreshai/${activeEntry.repo}/tree/${activeEntry.branch}`} target="_blank" rel="noopener noreferrer" style={{ color: '#a6e3a1', textDecoration: 'none' }}>{activeEntry.branch}</a>
+                </>
+              )}
+              <span style={{ color: '#555', margin: '0 4px' }}>·</span>
+              <a href={`https://github.com/etdofreshai/${activeEntry.repo}/commit/${activeEntry.sha}`} target="_blank" rel="noopener noreferrer" style={{ color: '#89b4fa', fontFamily: 'monospace', textDecoration: 'none' }}>{activeEntry.sha.slice(0, 7)}</a>
+              {activeEntry.commitDate && (
+                <span title={new Date(activeEntry.commitDate).toLocaleString()}>{timeAgo(activeEntry.commitDate)}</span>
+              )}
+              {activeEntry.commitMessage && (
+                <span style={{ color: '#cdd6f4' }}>{activeEntry.commitMessage.slice(0, 50)}{activeEntry.commitMessage.length > 50 ? '…' : ''}</span>
+              )}
+              <span style={{ color: '#6b7280', marginLeft: 4 }}>
+                {previewPort ? `:${previewPort}` : activeEntry.type === 'static' ? 'static' : ''}
+              </span>
+            </>
+          ) : <span>Live Edit TypeScript</span>}
+          <div className="top-bar-controls">
+            <button className="top-bar-btn" onClick={() => { if (activeEntry) { setSelectedRepo(activeEntry.repo); setShowEnvModal(true); } }} title="Environment variables">⚙️ Env</button>
+            <button className="top-bar-btn" onClick={async () => {
+              if (!activeEntry) return;
+              try { const res = await api(`/api/cache/${activeEntry.id}/log`); setLogContent(res.log || '(no log output)'); } catch { setLogContent('(failed to fetch log)'); }
+              setShowLogModal(true);
+            }} title="Server log">📋 Log</button>
+            <button className="top-bar-btn" onClick={() => setSidebarOpen(o => !o)} title={sidebarOpen ? 'Hide sidebar' : 'Show sidebar'}>{sidebarOpen ? '✕' : '☰'}</button>
+            <button className="top-bar-btn" onClick={() => setShowHeader(false)} title="Hide top bar">▲</button>
+          </div>
+        </div>
+      )}
+      {!showHeader && (
+        <button
+          onClick={() => setShowHeader(true)}
+          style={{ position: 'fixed', top: 6, right: 6, zIndex: 200, background: 'rgba(26,26,46,0.85)', color: '#6b7280', border: '1px solid #3a3a5e', borderRadius: 6, padding: '2px 8px', cursor: 'pointer', fontSize: 12 }}
+          title="Show top bar"
+        >▼</button>
+      )}
 
+      <div className="main-content">
       <div className={`sidebar ${sidebarOpen ? '' : 'collapsed'}`}>
         <h2>Live Edit TypeScript</h2>
         {error && <div className="error-banner">{error}</div>}
@@ -627,72 +671,6 @@ export default function App() {
       </div>
 
       <div className="preview-area">
-        {!showHeader && (
-          <button
-            onClick={() => setShowHeader(true)}
-            style={{ position: 'absolute', top: 6, right: 6, zIndex: 20, background: 'rgba(26,26,46,0.8)', color: '#6b7280', border: '1px solid #3a3a5e', borderRadius: 6, padding: '2px 8px', cursor: 'pointer', fontSize: 12 }}
-            title="Show header"
-          >▼</button>
-        )}
-        {showHeader && <div className="preview-header">
-          <span className={`dot ${previewPort || activeEntry?.type === 'static' ? 'green' : 'gray'}`} />
-          {activeEntry ? (
-            <>
-              <a href="https://github.com/etdofreshai" target="_blank" rel="noopener noreferrer" style={{ color: '#6b7280', textDecoration: 'none' }}>etdofreshai</a>
-              <span style={{ color: '#555', margin: '0 2px' }}>/</span>
-              <a href={`https://github.com/etdofreshai/${activeEntry.repo}`} target="_blank" rel="noopener noreferrer" style={{ color: '#cdd6f4', textDecoration: 'none', display: 'inline-flex', alignItems: 'center', gap: 3 }}>
-                {activeEntry.repo}
-                <span style={{ fontSize: 10, color: '#6b7280' }}>↗</span>
-              </a>
-              {activeEntry.branch && (
-                <>
-                  <span style={{ color: '#555', margin: '0 4px' }}>@</span>
-                  <a href={`https://github.com/etdofreshai/${activeEntry.repo}/tree/${activeEntry.branch}`} target="_blank" rel="noopener noreferrer" style={{ color: '#a6e3a1', textDecoration: 'none', display: 'inline-flex', alignItems: 'center', gap: 3 }}>
-                    {activeEntry.branch}
-                    <span style={{ fontSize: 10, color: '#6b7280' }}>↗</span>
-                  </a>
-                </>
-              )}
-              <span style={{ color: '#555', margin: '0 4px' }}>·</span>
-              <a href={`https://github.com/etdofreshai/${activeEntry.repo}/commit/${activeEntry.sha}`} target="_blank" rel="noopener noreferrer" style={{ color: '#89b4fa', fontFamily: 'monospace', textDecoration: 'none', display: 'inline-flex', alignItems: 'center', gap: 3 }}>
-                {activeEntry.sha.slice(0, 7)}
-                <span style={{ fontSize: 10, color: '#6b7280' }}>↗</span>
-              </a>
-              {activeEntry.commitDate && (
-                <span style={{ marginRight: 6 }} title={new Date(activeEntry.commitDate).toLocaleString()}>{timeAgo(activeEntry.commitDate)}</span>
-              )}
-              {activeEntry.commitMessage && (
-                <span style={{ color: '#cdd6f4' }}>{activeEntry.commitMessage.slice(0, 50)}{activeEntry.commitMessage.length > 50 ? '…' : ''}</span>
-              )}
-              <button
-                onClick={() => { setSelectedRepo(activeEntry.repo); setShowEnvModal(true); }}
-                style={{ marginLeft: 'auto', background: 'transparent', color: '#cdd6f4', border: '1px solid #3a3a5e', borderRadius: 6, padding: '2px 10px', cursor: 'pointer', fontSize: 12, fontWeight: 600 }}
-              >
-                ⚙️ Env
-              </button>
-              <button
-                onClick={async () => {
-                  try {
-                    const res = await api(`/api/cache/${activeEntry.id}/log`);
-                    setLogContent(res.log || '(no log output)');
-                  } catch { setLogContent('(failed to fetch log)'); }
-                  setShowLogModal(true);
-                }}
-                style={{ background: 'transparent', color: '#cdd6f4', border: '1px solid #3a3a5e', borderRadius: 6, padding: '2px 10px', cursor: 'pointer', fontSize: 12, fontWeight: 600, marginLeft: 4 }}
-              >
-                📋 Log
-              </button>
-              <span style={{ marginLeft: 8, color: '#6b7280' }}>
-                {previewPort ? `:${previewPort}` : activeEntry.type === 'static' ? 'static' : ''}
-              </span>
-            </>
-          ) : 'No preview'}
-          <button
-            onClick={() => setShowHeader(false)}
-            style={{ background: 'transparent', color: '#6b7280', border: '1px solid #3a3a5e', borderRadius: 6, padding: '2px 8px', cursor: 'pointer', fontSize: 12, marginLeft: 4 }}
-            title="Hide header"
-          >▲</button>
-        </div>}
         <div className="preview-body" style={{ position: 'relative' }}>
           {loading && (
             <div className="loading-overlay">
@@ -794,6 +772,7 @@ export default function App() {
           )}
         </div>
       </div>
+      </div>{/* close main-content */}
 
       {showEnvModal && (
         <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.7)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000 }} onClick={() => setShowEnvModal(false)}>
