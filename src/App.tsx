@@ -20,8 +20,34 @@ export default function App() {
   const [error, setError] = useState('');
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [activeEntryId, setActiveEntryId] = useState<string | null>(null);
+  const [files, setFiles] = useState<string[]>([]);
+  const [currentFile, setCurrentFile] = useState<{ path: string; content?: string; binary?: boolean } | null>(null);
+  const [expandedDirs, setExpandedDirs] = useState<Set<string>>(new Set());
 
   const activeEntry = cache.find(e => e.id === activeEntryId) || (previewPort ? cache.find(e => e.port === previewPort) : null);
+
+  const showEntry = async (entry: CacheEntry) => {
+    setActiveEntryId(entry.id);
+    if (entry.type === 'static') {
+      setPreviewPort(null);
+      const fileList = await api(`/api/cache/${entry.id}/files`);
+      setFiles(fileList);
+      setCurrentFile(null);
+      setExpandedDirs(new Set());
+    } else {
+      setPreviewPort(entry.port);
+    }
+    setSidebarOpen(false);
+  };
+
+  const viewFile = async (cacheId: string, filePath: string) => {
+    try {
+      const data = await api(`/api/cache/${cacheId}/files/${encodeURIComponent(filePath)}`);
+      setCurrentFile(data);
+    } catch {
+      setCurrentFile({ path: filePath, binary: true });
+    }
+  };
 
   useEffect(() => { api('/api/repos').then(setRepos).catch(e => setError(e.message)); refreshCache(); }, []);
 
