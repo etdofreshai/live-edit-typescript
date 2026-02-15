@@ -5,7 +5,7 @@ import httpProxy from 'http-proxy';
 import fs from 'fs';
 import pathModule from 'path';
 import multer from 'multer';
-import FormData from 'form-data';
+// Using native FormData + Blob (Node 22)
 import { listRepos, listBranches, listCommits, getBranchHead, getCommit, createBranch, getDefaultBranch, compareBranches, createPullRequest, OWNER } from './github.js';
 import { getEntry, addEntry, evictIfNeeded, allocatePort, removeEntry, listEntries, makeId, getEntryByPort, getLatestEntries, updateEntry, getEntryById } from './cache-manager.js';
 import { cloneAndStart, getTargetDir, pullLatest, getServerLog } from './runner.js';
@@ -263,20 +263,17 @@ app.post('/api/voice', upload.single('audio'), async (req, res) => {
     }
 
     // Step 1: Transcribe audio using OpenAI Whisper
+    const blob = new Blob([new Uint8Array(req.file.buffer)], { type: req.file.mimetype || 'audio/webm' });
     const formData = new FormData();
-    formData.append('file', req.file.buffer, {
-      filename: 'audio.webm',
-      contentType: req.file.mimetype,
-    });
+    formData.append('file', blob, 'audio.webm');
     formData.append('model', 'whisper-1');
 
     const whisperResponse = await fetch('https://api.openai.com/v1/audio/transcriptions', {
       method: 'POST',
       headers: {
         'Authorization': `Bearer ${OPENAI_API_KEY}`,
-        ...formData.getHeaders(),
       },
-      body: formData as any,
+      body: formData,
     });
 
     if (!whisperResponse.ok) {
