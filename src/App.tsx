@@ -345,7 +345,18 @@ export default function App() {
 
   const selectRepo = async (name: string) => {
     setSelectedRepo(name); setSelectedBranch(''); setCommits([]);
-    setBranches(await api(`/api/repos/${name}/branches`));
+    const branchList = await api(`/api/repos/${name}/branches`);
+    setBranches(branchList);
+
+    // Auto-select branch: prefer one that's already running in cache, else default branch
+    const cachedEntry = cache.find(e => e.repo === name);
+    const cachedBranch = cachedEntry?.branch;
+    const defaultBranch = branchList.find((b: any) => b.name === 'main')?.name
+      || branchList.find((b: any) => b.name === 'master')?.name
+      || branchList[0]?.name;
+    const autoSelect = (cachedBranch && branchList.some((b: any) => b.name === cachedBranch))
+      ? cachedBranch : defaultBranch;
+    if (autoSelect) selectBranch(autoSelect);
   };
 
   const handleCreateBranch = async (fromBranch: string, name: string) => {
