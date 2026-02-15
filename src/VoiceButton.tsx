@@ -1,6 +1,6 @@
 import React, { useState, useRef } from 'react';
 
-type VoiceState = 'idle' | 'recording' | 'transcribing' | 'sending';
+type VoiceState = 'idle' | 'recording' | 'transcribing' | 'sending' | 'done';
 
 interface VoiceContext {
   owner?: string;
@@ -12,19 +12,8 @@ interface VoiceContext {
 export function VoiceButton({ context }: { context?: VoiceContext }) {
   const [state, setState] = useState<VoiceState>('idle');
   const [transcript, setTranscript] = useState<string>('');
-  const [showTranscript, setShowTranscript] = useState(false);
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const chunksRef = useRef<Blob[]>([]);
-  const fadeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-
-  const showText = (text: string, autoHide = true) => {
-    setTranscript(text);
-    setShowTranscript(true);
-    if (fadeTimerRef.current) clearTimeout(fadeTimerRef.current);
-    if (autoHide) {
-      fadeTimerRef.current = setTimeout(() => setShowTranscript(false), 4000);
-    }
-  };
 
   const startRecording = async () => {
     try {
@@ -45,10 +34,12 @@ export function VoiceButton({ context }: { context?: VoiceContext }) {
       mediaRecorder.start();
       mediaRecorderRef.current = mediaRecorder;
       setState('recording');
-      setShowTranscript(false);
+      setTranscript('');
     } catch (err) {
       console.error('Failed to start recording:', err);
-      showText('⚠ Microphone access denied');
+      setTranscript('⚠ Microphone access denied');
+      setState('done');
+      setTimeout(() => { setState('idle'); setTranscript(''); }, 3000);
     }
   };
 
@@ -74,13 +65,14 @@ export function VoiceButton({ context }: { context?: VoiceContext }) {
       const { transcript: text } = await transcribeRes.json();
 
       if (!text || !text.trim()) {
-        showText('(no speech detected)');
-        setState('idle');
+        setTranscript('(no speech detected)');
+        setState('done');
+        setTimeout(() => { setState('idle'); setTranscript(''); }, 3000);
         return;
       }
 
-      // Show transcript immediately
-      showText(`"${text}"`, false);
+      // Show transcript immediately, switch to sending
+      setTranscript(`"${text}"`);
       setState('sending');
 
       // Step 2: Send to OpenClaw
@@ -91,15 +83,20 @@ export function VoiceButton({ context }: { context?: VoiceContext }) {
       });
 
       if (!sendRes.ok) {
-        showText(`"${text}" — ⚠ failed to send`);
-      } else {
-        showText(`"${text}" — ✓ sent`);
+        setTranscript(`"${text}" — ⚠ send failed`);
+        setState('done');
+        setTimeout(() => { setState('idle'); setTranscript(''); }, 4000);
+        return;
       }
-      setState('idle');
+
+      // Success — show checkmark briefly, then fade everything
+      setState('done');
+      setTimeout(() => { setState('idle'); setTranscript(''); }, 2000);
     } catch (err) {
       console.error('Voice error:', err);
-      showText('⚠ Error processing audio');
-      setState('idle');
+      setTranscript('⚠ Error processing audio');
+      setState('done');
+      setTimeout(() => { setState('idle'); setTranscript(''); }, 3000);
     }
   };
 
@@ -109,39 +106,57 @@ export function VoiceButton({ context }: { context?: VoiceContext }) {
   };
 
   const busy = state === 'transcribing' || state === 'sending';
+  const showTranscript = transcript && state !== 'idle' && state !== 'recording';
+
+  // Button icon
+  const icon = () => {
+    if (state === 'done') {
+      // Checkmark
+      return (
+        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#a6e3a1" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+          <polyline points="20 6 9 17 4 12" />
+        </svg>
+      );
+    }
+    if (busy) {
+      // Spinner
+      return (
+        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+          <circle cx="12" cy="12" r="10" opacity="0.25" />
+          <path d="M12 2 A10 10 0 0 1 22 12" className="spinner-path" />
+        </svg>
+      );
+    }
+    // Mic
+    return (
+      <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+        <path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z" />
+        <path d="M19 10v2a7 7 0 0 1-14 0v-2" />
+        <line x1="12" y1="19" x2="12" y2="23" />
+        <line x1="8" y1="23" x2="16" y2="23" />
+      </svg>
+    );
+  };
 
   return (
     <>
       <button
-        className={`voice-btn ${state === 'recording' ? 'recording' : ''} ${busy ? 'processing' : ''}`}
+        className={`voice-btn ${state === 'recording' ? 'recording' : ''} ${busy ? 'processing' : ''} ${state === 'done' ? 'done' : ''}`}
         onClick={handleClick}
-        disabled={busy}
+        disabled={busy || state === 'done'}
         title={
           state === 'idle' ? 'Click to record' :
           state === 'recording' ? 'Click to stop' :
           state === 'transcribing' ? 'Transcribing...' :
-          'Sending to OpenClaw...'
+          state === 'sending' ? 'Sending...' : 'Sent!'
         }
       >
-        {busy ? (
-          <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-            <circle cx="12" cy="12" r="10" opacity="0.25" />
-            <path d="M12 2 A10 10 0 0 1 22 12" className="spinner-path" />
-          </svg>
-        ) : (
-          <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-            <path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z" />
-            <path d="M19 10v2a7 7 0 0 1-14 0v-2" />
-            <line x1="12" y1="19" x2="12" y2="23" />
-            <line x1="8" y1="23" x2="16" y2="23" />
-          </svg>
-        )}
+        {icon()}
       </button>
 
-      {showTranscript && transcript && (
-        <div className="voice-transcript">
-          <div className="voice-transcript-text">{transcript}</div>
-          {state === 'sending' && <div className="voice-transcript-status">Sending to OpenClaw...</div>}
+      {showTranscript && (
+        <div className={`voice-transcript ${state === 'done' ? 'fading' : ''}`}>
+          {transcript}
         </div>
       )}
     </>

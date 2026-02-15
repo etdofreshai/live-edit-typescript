@@ -293,12 +293,22 @@ body {
   line-height: 1.4;
   box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
   z-index: 999;
-  animation: fadeIn 0.2s ease, fadeOut 0.5s ease 2.5s;
+  animation: fadeIn 0.2s ease;
+}
+
+.voice-transcript.fading {
+  animation: fadeOut 1.8s ease forwards;
+}
+
+/* Done state - green glow */
+.voice-btn.done {
+  background: var(--accent-green-dim);
+  color: var(--accent-green);
+  opacity: 1;
 }
 
 @keyframes fadeOut {
-  to {
-    opacity: 0;
-    transform: translateY(10px);
-  }
+  0% { opacity: 1; transform: translateY(0); }
+  70% { opacity: 1; transform: translateY(0); }
+  100% { opacity: 0; transform: translateY(10px); }
 }
