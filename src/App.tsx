@@ -84,7 +84,18 @@ export default function App() {
 
   return (
     <div style={{ fontFamily: 'system-ui', padding: 20, display: 'flex', gap: 20, height: '100vh', boxSizing: 'border-box' }}>
-      <div style={{ width: 400, flexShrink: 0, overflow: 'auto' }}>
+      <style>{spinnerCSS}</style>
+      <button onClick={() => setSidebarOpen(o => !o)} style={{
+        position: 'fixed', top: 10, left: 10, zIndex: 100, width: 36, height: 36,
+        border: '1px solid #ddd', borderRadius: 6, background: 'white', cursor: 'pointer',
+        fontSize: 18, display: 'flex', alignItems: 'center', justifyContent: 'center',
+        boxShadow: '0 1px 3px rgba(0,0,0,0.1)'
+      }}>{sidebarOpen ? '✕' : '☰'}</button>
+      <div style={{
+        width: sidebarOpen ? 400 : 0, flexShrink: 0, overflow: sidebarOpen ? 'auto' : 'hidden',
+        transition: 'width 0.2s ease', opacity: sidebarOpen ? 1 : 0,
+        paddingLeft: sidebarOpen ? 0 : 0, marginTop: 30
+      }}>
         <h2>Live Edit TypeScript</h2>
         {error && <div style={{ color: 'red', marginBottom: 10 }}>{error}</div>}
 
@@ -120,7 +131,7 @@ export default function App() {
               </div>
               <button onClick={runLatest} disabled={!!loading}
                 style={{ marginLeft: 8, padding: '4px 10px', cursor: 'pointer', background: '#059669', color: 'white', border: 'none', borderRadius: 4 }}>
-                {loading === 'latest' ? '⏳' : '▶ Run'}
+                {loading === 'latest' ? <span className="spinner" /> : '▶ Run'}
               </button>
             </div>
             {commits.map((c: any) => (
@@ -131,7 +142,7 @@ export default function App() {
                 </div>
                 <button onClick={() => run(c.sha)} disabled={!!loading}
                   style={{ marginLeft: 8, padding: '4px 10px', cursor: 'pointer' }}>
-                  {loading === c.sha ? '⏳' : '▶ Run'}
+                  {loading === c.sha ? <span className="spinner" /> : '▶ Run'}
                 </button>
               </div>
             ))}
@@ -147,14 +158,23 @@ export default function App() {
               {e.isLatest && <span style={{ marginLeft: 6, background: '#059669', color: 'white', padding: '1px 6px', borderRadius: 8, fontSize: 11 }}>latest · {e.branch}</span>}
             </div>
             <div>
-              <button onClick={() => setPreviewPort(e.port)} style={{ marginRight: 4, cursor: 'pointer' }}>👁</button>
+              <button onClick={() => { setPreviewPort(e.port); setSidebarOpen(false); }} style={{ marginRight: 4, cursor: 'pointer' }}>👁</button>
               <button onClick={() => remove(e.id)} style={{ cursor: 'pointer' }}>✕</button>
             </div>
           </div>
         ))}
       </div>
 
-      <div style={{ flex: 1, border: '1px solid #ddd', borderRadius: 4, overflow: 'hidden' }}>
+      <div style={{ flex: 1, border: '1px solid #ddd', borderRadius: 4, overflow: 'hidden', position: 'relative' }}>
+        {loading && (
+          <div style={{
+            position: 'absolute', inset: 0, zIndex: 10, background: 'rgba(255,255,255,0.85)',
+            display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 12
+          }}>
+            <span className="spinner spinner-large" />
+            <div className="loading-pulse" style={{ color: '#4f46e5', fontWeight: 500 }}>Starting server… this may take a minute</div>
+          </div>
+        )}
         {previewPort ? (
           <iframe src={`/proxy/${previewPort}/`} style={{ width: '100%', height: '100%', border: 'none' }} />
         ) : (
