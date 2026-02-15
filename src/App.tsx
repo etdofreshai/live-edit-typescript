@@ -136,6 +136,22 @@ function IframeWithRetry({ port, cacheId }: { port: number; cacheId?: string }) 
   );
 }
 
+function timeAgo(dateStr: string): string {
+  const now = Date.now();
+  const then = new Date(dateStr).getTime();
+  const sec = Math.floor((now - then) / 1000);
+  if (sec < 60) return 'just now';
+  const min = Math.floor(sec / 60);
+  if (min < 60) return `${min}m ago`;
+  const hr = Math.floor(min / 60);
+  if (hr < 24) return `${hr}h ago`;
+  const days = Math.floor(hr / 24);
+  if (days < 30) return `${days}d ago`;
+  const months = Math.floor(days / 30);
+  if (months < 12) return `${months}mo ago`;
+  return `${Math.floor(months / 12)}y ago`;
+}
+
 export default function App() {
   const saved = useRef(loadPersistedState());
   const [repos, setRepos] = useState<any[]>([]);
@@ -569,6 +585,9 @@ export default function App() {
                       >↗</a>
                     </div>
                     <div className="commit-msg">{c.commit?.message?.split('\n')[0]}</div>
+                    {c.commit?.author?.date && (
+                      <div style={{ color: '#6b7280', fontSize: 11 }} title={new Date(c.commit.author.date).toLocaleString()}>{timeAgo(c.commit.author.date)}</div>
+                    )}
                   </div>
                   <button className="btn-run" onClick={() => run(c.sha)} disabled={!!loading}>
                     {loading === c.sha ? <span className="spinner" /> : '▶ Run'}
@@ -630,7 +649,7 @@ export default function App() {
                 <span style={{ fontSize: 10, color: '#6b7280' }}>↗</span>
               </a>
               {activeEntry.commitDate && (
-                <span style={{ marginRight: 6 }}>{new Date(activeEntry.commitDate).toLocaleString()}</span>
+                <span style={{ marginRight: 6 }} title={new Date(activeEntry.commitDate).toLocaleString()}>{timeAgo(activeEntry.commitDate)}</span>
               )}
               {activeEntry.commitMessage && (
                 <span style={{ color: '#cdd6f4' }}>{activeEntry.commitMessage.slice(0, 50)}{activeEntry.commitMessage.length > 50 ? '…' : ''}</span>
