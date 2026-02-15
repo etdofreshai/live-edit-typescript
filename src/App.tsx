@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useRef } from 'react';
 import './styles.css';
 
 interface CacheEntry {
@@ -6,23 +6,53 @@ interface CacheEntry {
   branch?: string; isLatest?: boolean;
 }
 
+const STORAGE_KEY = 'live-edit-state';
+
+interface PersistedState {
+  selectedRepo: string;
+  selectedBranch: string;
+  activeEntryId: string | null;
+  previewPort: number | null;
+  sidebarOpen: boolean;
+}
+
+function loadPersistedState(): Partial<PersistedState> {
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY);
+    if (!raw) return {};
+    return JSON.parse(raw);
+  } catch { return {}; }
+}
+
+function savePersistedState(state: PersistedState) {
+  try { localStorage.setItem(STORAGE_KEY, JSON.stringify(state)); } catch {}
+}
+
 const api = (path: string, opts?: RequestInit) => fetch(path, opts).then(r => r.json());
 
 export default function App() {
+  const saved = useRef(loadPersistedState());
   const [repos, setRepos] = useState<any[]>([]);
-  const [selectedRepo, setSelectedRepo] = useState('');
+  const [selectedRepo, setSelectedRepo] = useState(saved.current.selectedRepo || '');
   const [branches, setBranches] = useState<any[]>([]);
-  const [selectedBranch, setSelectedBranch] = useState('');
+  const [selectedBranch, setSelectedBranch] = useState(saved.current.selectedBranch || '');
   const [commits, setCommits] = useState<any[]>([]);
   const [cache, setCache] = useState<CacheEntry[]>([]);
-  const [previewPort, setPreviewPort] = useState<number | null>(null);
+  const [previewPort, setPreviewPort] = useState<number | null>(saved.current.previewPort ?? null);
   const [loading, setLoading] = useState('');
   const [error, setError] = useState('');
-  const [sidebarOpen, setSidebarOpen] = useState(true);
-  const [activeEntryId, setActiveEntryId] = useState<string | null>(null);
+  const [sidebarOpen, setSidebarOpen] = useState(saved.current.sidebarOpen ?? true);
+  const [activeEntryId, setActiveEntryId] = useState<string | null>(saved.current.activeEntryId ?? null);
   const [files, setFiles] = useState<string[]>([]);
   const [currentFile, setCurrentFile] = useState<{ path: string; content?: string; binary?: boolean } | null>(null);
   const [expandedDirs, setExpandedDirs] = useState<Set<string>>(new Set());
+  const [restoringState, setRestoringState] = useState(true);
+
+  // Persist state on changes
+  useEffect(() => {
+    if (restoringState) return;
+    savePersistedState({ selectedRepo, selectedBranch, activeEntryId, previewPort, sidebarOpen });
+  }, [selectedRepo, selectedBranch, activeEntryId, previewPort, sidebarOpen, restoringState]);
 
   const activeEntry = cache.find(e => e.id === activeEntryId) || (previewPort ? cache.find(e => e.port === previewPort) : null);
 
@@ -49,7 +79,52 @@ export default function App() {
     }
   };
 
-  useEffect(() => { api('/api/repos').then(setRepos).catch(e => setError(e.message)); refreshCache(); }, []);
+  // Initial load + restore persisted state
+  useEffect(() => {
+    const init = async () => {
+      try {
+        const [repoList, cacheList] = await Promise.all([api('/api/repos'), api('/api/cache')]);
+        setRepos(repoList);
+        setCache(cacheList);
+
+        const s = saved.current;
+        if (s.selectedRepo) {
+          const repoExists = repoList.some((r: any) => r.name === s.selectedRepo);
+          if (repoExists) {
+            const branchList = await api(`/api/repos/${s.selectedRepo}/branches`);
+            setBranches(branchList);
+
+            if (s.selectedBranch) {
+              const branchExists = branchList.some((b: any) => b.name === s.selectedBranch);
+              if (branchExists) {
+                const commitList = await api(`/api/repos/${s.selectedRepo}/branches/${encodeURIComponent(s.selectedBranch)}/commits`);
+                setCommits(commitList);
+              } else {
+                setSelectedBranch('');
+              }
+            }
+          } else {
+            setSelectedRepo('');
+            setSelectedBranch('');
+          }
+        }
+
+        // Validate active entry still exists in cache
+        if (s.activeEntryId) {
+          const entryExists = cacheList.some((e: CacheEntry) => e.id === s.activeEntryId);
+          if (!entryExists) {
+            setActiveEntryId(null);
+            setPreviewPort(null);
+          }
+        }
+      } catch (e: any) {
+        setError(e.message);
+      } finally {
+        setRestoringState(false);
+      }
+    };
+    init();
+  }, []);
 
   const refreshCache = () => api('/api/cache').then(setCache);
 
