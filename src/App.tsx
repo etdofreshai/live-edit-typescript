@@ -14,6 +14,8 @@ interface PersistedState {
   activeEntryId: string | null;
   previewPort: number | null;
   sidebarOpen: boolean;
+  // Info needed to auto-re-run after server restart
+  lastRun?: { repo: string; sha: string; branch?: string; isLatest?: boolean } | null;
 }
 
 function loadPersistedState(): Partial<PersistedState> {
@@ -51,8 +53,9 @@ export default function App() {
   // Persist state on changes
   useEffect(() => {
     if (restoringState) return;
-    savePersistedState({ selectedRepo, selectedBranch, activeEntryId, previewPort, sidebarOpen });
-  }, [selectedRepo, selectedBranch, activeEntryId, previewPort, sidebarOpen, restoringState]);
+    const lastRun = activeEntry ? { repo: activeEntry.repo, sha: activeEntry.sha, branch: activeEntry.branch, isLatest: activeEntry.isLatest } : null;
+    savePersistedState({ selectedRepo, selectedBranch, activeEntryId, previewPort, sidebarOpen, lastRun });
+  }, [selectedRepo, selectedBranch, activeEntryId, previewPort, sidebarOpen, restoringState, activeEntry]);
 
   const activeEntry = cache.find(e => e.id === activeEntryId) || (previewPort ? cache.find(e => e.port === previewPort) : null);
 
@@ -109,10 +112,39 @@ export default function App() {
           }
         }
 
-        // Validate active entry still exists in cache
+        // Validate active entry still exists in cache — if not, auto-re-run
         if (s.activeEntryId) {
           const entryExists = cacheList.some((e: CacheEntry) => e.id === s.activeEntryId);
-          if (!entryExists) {
+          if (!entryExists && s.lastRun) {
+            // Server restarted — re-run the last entry
+            setLoading('restoring');
+            try {
+              let entry;
+              if (s.lastRun.isLatest && s.lastRun.branch) {
+                entry = await api('/api/run-latest', {
+                  method: 'POST', headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({ repo: s.lastRun.repo, branch: s.lastRun.branch }),
+                });
+              } else {
+                entry = await api('/api/run', {
+                  method: 'POST', headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({ repo: s.lastRun.repo, sha: s.lastRun.sha }),
+                });
+              }
+              if (entry && !entry.error) {
+                setActiveEntryId(entry.id);
+                setPreviewPort(entry.port || null);
+                setCache(await api('/api/cache'));
+              } else {
+                setActiveEntryId(null);
+                setPreviewPort(null);
+              }
+            } catch {
+              setActiveEntryId(null);
+              setPreviewPort(null);
+            }
+            setLoading('');
+          } else if (!entryExists) {
             setActiveEntryId(null);
             setPreviewPort(null);
           }
