@@ -1,6 +1,7 @@
 import express from 'express';
 import cors from 'cors';
-import { createProxyMiddleware } from 'http-proxy-middleware';
+import http from 'http';
+import httpProxy from 'http-proxy';
 import { listRepos, listBranches, listCommits } from './github.js';
 import { getEntry, addEntry, evictIfNeeded, allocatePort, removeEntry, listEntries, makeId, getEntryByPort } from './cache-manager.js';
 import { cloneAndStart, getTargetDir } from './runner.js';
@@ -8,6 +9,16 @@ import { cloneAndStart, getTargetDir } from './runner.js';
 const app = express();
 app.use(cors());
 app.use(express.json());
+
+// Single reusable proxy instance
+const proxy = httpProxy.createProxyServer({ ws: true, changeOrigin: true });
+proxy.on('error', (err, _req, res) => {
+  console.error('Proxy error:', err.message);
+  if (res && 'writeHead' in res) {
+    (res as http.ServerResponse).writeHead(502, { 'Content-Type': 'text/plain' });
+    (res as http.ServerResponse).end('Proxy error');
+  }
+});
 
 app.get('/api/repos', async (_req, res) => {
   try {
@@ -42,11 +53,9 @@ app.post('/api/run', async (req, res) => {
   const { repo, sha } = req.body;
   if (!repo || !sha) return res.status(400).json({ error: 'repo and sha required' });
 
-  // Check if already cached
   const existing = getEntry(repo, sha);
   if (existing) return res.json(existing);
 
-  // Evict if needed
   await evictIfNeeded();
 
   const port = allocatePort();
@@ -75,35 +84,33 @@ app.delete('/api/cache/:id', async (req, res) => {
   res.json({ ok });
 });
 
-// Proxy requests to target dev servers: /proxy/:port/...
-// Target Vite servers run with --base /proxy/{port}/ so they expect the full path
-app.use('/proxy/:port', (req, res, next) => {
+// Proxy /proxy/:port/* to target Vite dev servers
+// Strip /proxy/:port prefix before forwarding
+app.use('/proxy/:port', (req, res) => {
   const port = parseInt(req.params.port);
   if (!port || !getEntryByPort(port)) {
     return res.status(404).json({ error: 'No server on that port' });
   }
-  const proxy = createProxyMiddleware({
-    target: `http://localhost:${port}`,
-    changeOrigin: true,
-    ws: true,
-  });
-  proxy(req, res, next);
+  // Strip the /proxy/{port} prefix
+  req.url = req.url || '/';
+  proxy.web(req, res, { target: `http://localhost:${port}` });
 });
 
-const server = app.listen(3000, () => console.log('API server on :3000'));
+const server = http.createServer(app);
 
-// Handle WebSocket upgrades for HMR
+// WebSocket upgrade for HMR
 server.on('upgrade', (req, socket, head) => {
   const match = req.url?.match(/^\/proxy\/(\d+)(\/.*)?$/);
   if (match) {
     const port = parseInt(match[1]);
     if (getEntryByPort(port)) {
-      const proxy = createProxyMiddleware({
-        target: `http://localhost:${port}`,
-        changeOrigin: true,
-        ws: true,
-      });
-      proxy.upgrade?.(req, socket, head);
+      // Strip the /proxy/{port} prefix for WS too
+      req.url = match[2] || '/';
+      proxy.ws(req, socket, head, { target: `http://localhost:${port}` });
+      return;
     }
   }
+  socket.destroy();
 });
+
+server.listen(3000, () => console.log('API server on :3000'));
