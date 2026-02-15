@@ -4,6 +4,8 @@ import './styles.css';
 interface CacheEntry {
   id: string; repo: string; sha: string; port: number; lastAccessed: number;
   branch?: string; isLatest?: boolean;
+  commitMessage?: string; commitDate?: string;
+  type?: 'vite' | 'static';
 }
 
 const STORAGE_KEY = 'live-edit-state';
@@ -299,7 +301,20 @@ export default function App() {
       <div className="preview-area">
         <div className="preview-header">
           <span className={`dot ${previewPort || activeEntry?.type === 'static' ? 'green' : 'gray'}`} />
-          {previewPort ? `Preview — port ${previewPort}` : activeEntry?.type === 'static' ? `Files — ${activeEntry.repo}` : 'No preview'}
+          {activeEntry ? (
+            <>
+              <code style={{ color: '#89b4fa', marginRight: 6 }}>{activeEntry.sha.slice(0, 7)}</code>
+              {activeEntry.commitDate && (
+                <span style={{ marginRight: 6 }}>{new Date(activeEntry.commitDate).toLocaleString()}</span>
+              )}
+              {activeEntry.commitMessage && (
+                <span style={{ color: '#cdd6f4' }}>{activeEntry.commitMessage.slice(0, 50)}{activeEntry.commitMessage.length > 50 ? '…' : ''}</span>
+              )}
+              <span style={{ marginLeft: 'auto', color: '#6b7280' }}>
+                {previewPort ? `:${previewPort}` : activeEntry.type === 'static' ? 'static' : ''}
+              </span>
+            </>
+          ) : 'No preview'}
         </div>
         <div className="preview-body">
           {loading && (

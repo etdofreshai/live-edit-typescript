@@ -10,6 +10,8 @@ export interface CacheEntry {
   pid?: number;
   branch?: string;
   isLatest?: boolean;
+  commitMessage?: string;
+  commitDate?: string;
   type?: 'vite' | 'static';
 }
 

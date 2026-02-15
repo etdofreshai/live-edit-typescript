@@ -4,7 +4,7 @@ import http from 'http';
 import httpProxy from 'http-proxy';
 import fs from 'fs';
 import pathModule from 'path';
-import { listRepos, listBranches, listCommits, getBranchHead } from './github.js';
+import { listRepos, listBranches, listCommits, getBranchHead, getCommit } from './github.js';
 import { getEntry, addEntry, evictIfNeeded, allocatePort, removeEntry, listEntries, makeId, getEntryByPort, getLatestEntries, updateEntry, getEntryById } from './cache-manager.js';
 import { cloneAndStart, getTargetDir, pullLatest } from './runner.js';
 import { webhookRouter, registerWebhook, unregisterWebhook } from './webhook.js';
@@ -67,7 +67,10 @@ app.post('/api/run', async (req, res) => {
   if (!port) return res.status(503).json({ error: 'No ports available' });
 
   try {
-    const { dir, pid, type } = await cloneAndStart(repo, sha, port);
+    const [{ dir, pid, type }, commitInfo] = await Promise.all([
+      cloneAndStart(repo, sha, port),
+      getCommit(repo, sha).catch(() => ({ message: '', date: '' })),
+    ]);
     const entry = {
       id: makeId(repo, sha),
       repo,
@@ -77,6 +80,8 @@ app.post('/api/run', async (req, res) => {
       lastAccessed: Date.now(),
       pid,
       type,
+      commitMessage: commitInfo.message,
+      commitDate: commitInfo.date,
     };
     addEntry(entry);
     res.json(entry);
@@ -103,7 +108,10 @@ app.post('/api/run-latest', async (req, res) => {
     const port = allocatePort();
     if (!port) return res.status(503).json({ error: 'No ports available' });
 
-    const { dir, pid, type } = await cloneAndStart(repo, sha, port, { branch, isLatest: true });
+    const [{ dir, pid, type }, commitInfo] = await Promise.all([
+      cloneAndStart(repo, sha, port, { branch, isLatest: true }),
+      getCommit(repo, sha).catch(() => ({ message: '', date: '' })),
+    ]);
     const entry = {
       id: makeId(repo, sha),
       repo, sha, port, dir, pid,
@@ -111,6 +119,8 @@ app.post('/api/run-latest', async (req, res) => {
       branch,
       isLatest: true,
       type,
+      commitMessage: commitInfo.message,
+      commitDate: commitInfo.date,
     };
     addEntry(entry);
 

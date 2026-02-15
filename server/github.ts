@@ -29,4 +29,12 @@ export async function getBranchHead(repo: string, branch: string): Promise<strin
   return data.commit.sha;
 }
 
+export async function getCommit(repo: string, sha: string): Promise<{ message: string; date: string }> {
+  const data = await ghFetch(`/repos/${OWNER}/${repo}/commits/${sha}`);
+  return {
+    message: data.commit?.message?.split('\n')[0] || '',
+    date: data.commit?.committer?.date || data.commit?.author?.date || '',
+  };
+}
+
 export { OWNER };
