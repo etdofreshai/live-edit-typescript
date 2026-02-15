@@ -7,7 +7,7 @@ import pathModule from 'path';
 import { listRepos, listBranches, listCommits, getBranchHead } from './github.js';
 import { getEntry, addEntry, evictIfNeeded, allocatePort, removeEntry, listEntries, makeId, getEntryByPort, getLatestEntries, updateEntry, getEntryById } from './cache-manager.js';
 import { cloneAndStart, getTargetDir, pullLatest } from './runner.js';
-import { webhookRouter, registerWebhook } from './webhook.js';
+import { webhookRouter, registerWebhook, unregisterWebhook } from './webhook.js';
 
 const app = express();
 app.use(cors());
@@ -124,7 +124,12 @@ app.post('/api/run-latest', async (req, res) => {
 });
 
 app.delete('/api/cache/:id', async (req, res) => {
+  const entry = getEntryById(req.params.id);
   const ok = await removeEntry(req.params.id);
+  // Clean up webhook if this was a latest entry
+  if (ok && entry?.isLatest && entry.repo) {
+    unregisterWebhook(entry.repo).catch(() => {});
+  }
   res.json({ ok });
 });
 

@@ -108,3 +108,46 @@ export async function registerWebhook(repo: string, requestHost?: string): Promi
     console.error(`[webhook] Registration error for ${repo}:`, e.message);
   }
 }
+
+// Remove webhook from a GitHub repo
+export async function unregisterWebhook(repo: string): Promise<void> {
+  if (!TOKEN) return;
+
+  const webhookUrl = process.env.WEBHOOK_URL;
+  if (!webhookUrl) return;
+
+  const headers: Record<string, string> = {
+    Accept: 'application/vnd.github+json',
+    Authorization: `Bearer ${TOKEN}`,
+    'User-Agent': 'live-edit-ts',
+  };
+
+  try {
+    // Check if any other latest entries still use this repo
+    const remaining = getLatestEntries().filter(e => e.repo === repo);
+    if (remaining.length > 0) {
+      console.log(`[webhook] Keeping hook for ${repo} — ${remaining.length} latest entries still active`);
+      return;
+    }
+
+    const listRes = await fetch(`https://api.github.com/repos/${OWNER}/${repo}/hooks`, { headers });
+    if (!listRes.ok) return;
+
+    const hooks = await listRes.json() as any[];
+    const hook = hooks.find((h: any) => h.config?.url === webhookUrl);
+    if (!hook) return;
+
+    const delRes = await fetch(`https://api.github.com/repos/${OWNER}/${repo}/hooks/${hook.id}`, {
+      method: 'DELETE',
+      headers,
+    });
+
+    if (delRes.ok || delRes.status === 204) {
+      console.log(`[webhook] Removed hook for ${repo}`);
+    } else {
+      console.warn(`[webhook] Failed to remove hook for ${repo}: ${delRes.status}`);
+    }
+  } catch (e: any) {
+    console.error(`[webhook] Unregister error for ${repo}:`, e.message);
+  }
+}
