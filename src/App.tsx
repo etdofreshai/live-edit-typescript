@@ -37,7 +37,7 @@ const api = (path: string, opts?: RequestInit) => fetch(path, opts).then(r => r.
 function IframeWithRetry({ port }: { port: number }) {
   const [ready, setReady] = useState(false);
   const [retryCount, setRetryCount] = useState(0);
-  const maxRetries = 10;
+  const maxRetries = 30; // up to 60s
 
   useEffect(() => {
     setReady(false);
