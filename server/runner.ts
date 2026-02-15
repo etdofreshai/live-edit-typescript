@@ -1,5 +1,5 @@
 import { execSync, spawn } from 'child_process';
-import { existsSync, rmSync, createWriteStream, readFileSync } from 'fs';
+import { existsSync, rmSync, readFileSync, openSync, closeSync } from 'fs';
 import path from 'path';
 import type { CacheEntry } from './cache-manager.js';
 import { OWNER } from './github.js';
@@ -39,18 +39,17 @@ export async function cloneAndStart(repo: string, sha: string, port: number, opt
 
   // Capture stdout/stderr to a log file for debugging
   const logPath = path.join(dir, '.vite-server.log');
-  const logStream = createWriteStream(logPath, { flags: 'w' });
+  const logFd = openSync(logPath, 'w');
 
   const child = spawn('npx', args, {
     cwd: dir,
-    stdio: ['ignore', logStream, logStream],
+    stdio: ['ignore', logFd, logFd],
     detached: true,
     env: { ...process.env, PORT: String(port) },
   });
   child.unref();
-  child.on('exit', (code) => {
-    logStream.write(`\n[process exited with code ${code}]\n`);
-    logStream.end();
+  child.on('exit', () => {
+    try { closeSync(logFd); } catch {}
   });
 
   await new Promise(r => setTimeout(r, 3000));
