@@ -10,6 +10,7 @@ export interface CacheEntry {
   pid?: number;
   branch?: string;
   isLatest?: boolean;
+  type?: 'vite' | 'static';
 }
 
 const MAX_ENTRIES = 10;

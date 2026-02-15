@@ -10,13 +10,12 @@ export function getTargetDir(repo: string, sha: string): string {
   return path.join(TARGETS_DIR, `${repo}-${sha.slice(0, 7)}`);
 }
 
-export async function cloneAndStart(repo: string, sha: string, port: number, opts?: { branch?: string; isLatest?: boolean }): Promise<{ dir: string; pid: number }> {
+export async function cloneAndStart(repo: string, sha: string, port: number, opts?: { branch?: string; isLatest?: boolean }): Promise<{ dir: string; pid: number; type: 'vite' | 'static' }> {
   const dir = getTargetDir(repo, sha);
 
   if (!existsSync(dir)) {
     const cloneUrl = `https://github.com/${OWNER}/${repo}.git`;
     if (opts?.isLatest) {
-      // Full clone for latest so we can pull later
       execSync(`git clone ${cloneUrl} ${dir}`, { stdio: 'pipe' });
       execSync(`git checkout ${sha}`, { cwd: dir, stdio: 'pipe' });
     } else {
@@ -25,20 +24,20 @@ export async function cloneAndStart(repo: string, sha: string, port: number, opt
     }
   }
 
+  // Check if package.json exists — if not, this is a static repo
+  if (!existsSync(path.join(dir, 'package.json'))) {
+    return { dir, pid: 0, type: 'static' };
+  }
+
   // Install deps
   execSync('npm install', { cwd: dir, stdio: 'pipe', timeout: 120_000 });
 
   const hmrEnabled = !!opts?.isLatest;
-  const { writeFileSync } = await import('fs');
-  writeFileSync(path.join(dir, 'vite.config.live-edit.js'), `
-import { defineConfig } from 'vite';
-export default defineConfig({
-  base: '/proxy/${port}/',
-  server: { hmr: ${hmrEnabled}, host: '0.0.0.0' },
-});
-`);
 
-  const child = spawn('npx', ['vite', '--config', 'vite.config.live-edit.js', '--port', String(port), '--strictPort'], {
+  // Start vite with --base flag; project's own vite.config is preserved
+  const args = ['vite', '--port', String(port), '--host', '0.0.0.0', '--strictPort', '--base', `/proxy/${port}/`];
+
+  const child = spawn('npx', args, {
     cwd: dir,
     stdio: 'ignore',
     detached: true,
@@ -46,10 +45,9 @@ export default defineConfig({
   });
   child.unref();
 
-  // Wait a bit for server to start
   await new Promise(r => setTimeout(r, 3000));
 
-  return { dir, pid: child.pid! };
+  return { dir, pid: child.pid!, type: 'vite' };
 }
 
 export async function pullLatest(entry: CacheEntry, newSha: string) {

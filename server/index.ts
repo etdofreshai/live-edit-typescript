@@ -2,6 +2,8 @@ import express from 'express';
 import cors from 'cors';
 import http from 'http';
 import httpProxy from 'http-proxy';
+import fs from 'fs';
+import pathModule from 'path';
 import { listRepos, listBranches, listCommits, getBranchHead } from './github.js';
 import { getEntry, addEntry, evictIfNeeded, allocatePort, removeEntry, listEntries, makeId, getEntryByPort, getLatestEntries, updateEntry, getEntryById } from './cache-manager.js';
 import { cloneAndStart, getTargetDir, pullLatest } from './runner.js';
@@ -62,7 +64,7 @@ app.post('/api/run', async (req, res) => {
   if (!port) return res.status(503).json({ error: 'No ports available' });
 
   try {
-    const { dir, pid } = await cloneAndStart(repo, sha, port);
+    const { dir, pid, type } = await cloneAndStart(repo, sha, port);
     const entry = {
       id: makeId(repo, sha),
       repo,
@@ -71,6 +73,7 @@ app.post('/api/run', async (req, res) => {
       dir,
       lastAccessed: Date.now(),
       pid,
+      type,
     };
     addEntry(entry);
     res.json(entry);
@@ -97,13 +100,14 @@ app.post('/api/run-latest', async (req, res) => {
     const port = allocatePort();
     if (!port) return res.status(503).json({ error: 'No ports available' });
 
-    const { dir, pid } = await cloneAndStart(repo, sha, port, { branch, isLatest: true });
+    const { dir, pid, type } = await cloneAndStart(repo, sha, port, { branch, isLatest: true });
     const entry = {
       id: makeId(repo, sha),
       repo, sha, port, dir, pid,
       lastAccessed: Date.now(),
       branch,
       isLatest: true,
+      type,
     };
     addEntry(entry);
     res.json(entry);
@@ -115,6 +119,58 @@ app.post('/api/run-latest', async (req, res) => {
 app.delete('/api/cache/:id', async (req, res) => {
   const ok = await removeEntry(req.params.id);
   res.json({ ok });
+});
+
+// File explorer endpoints for static repos
+app.get('/api/cache/:id/files', (req, res) => {
+  const entry = getEntryById(req.params.id);
+  if (!entry) return res.status(404).json({ error: 'Not found' });
+
+  const files: string[] = [];
+  const walk = (dir: string, prefix: string) => {
+    for (const item of fs.readdirSync(dir, { withFileTypes: true })) {
+      if (item.name === '.git' || item.name === 'node_modules') continue;
+      const rel = prefix ? `${prefix}/${item.name}` : item.name;
+      if (item.isDirectory()) {
+        files.push(rel + '/');
+        walk(pathModule.join(dir, item.name), rel);
+      } else {
+        files.push(rel);
+      }
+    }
+  };
+  try {
+    walk(entry.dir, '');
+    files.sort();
+    res.json(files);
+  } catch (e: any) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+app.get('/api/cache/:id/files/*', (req, res) => {
+  const entry = getEntryById(req.params.id);
+  if (!entry) return res.status(404).json({ error: 'Not found' });
+
+  const filePath = req.params[0];
+  const fullPath = pathModule.join(entry.dir, filePath);
+
+  // Prevent path traversal
+  if (!fullPath.startsWith(entry.dir)) return res.status(403).json({ error: 'Forbidden' });
+
+  try {
+    const stat = fs.statSync(fullPath);
+    if (stat.size > 500_000) return res.json({ binary: true, path: filePath });
+
+    const buf = fs.readFileSync(fullPath);
+    // Check if binary by looking for null bytes in first 8KB
+    const sample = buf.subarray(0, 8192);
+    if (sample.includes(0)) return res.json({ binary: true, path: filePath });
+
+    res.json({ content: buf.toString('utf-8'), path: filePath });
+  } catch (e: any) {
+    res.status(404).json({ error: 'File not found' });
+  }
 });
 
 // Proxy /proxy/:port/* → target Vite dev server
