@@ -223,3 +223,82 @@ body {
 .loading-overlay .loading-text {
   color: var(--accent); font-weight: 500; font-size: 14px;
 }
+
+/* === Voice Button === */
+.voice-btn {
+  position: fixed;
+  bottom: 20px;
+  right: 20px;
+  width: 48px;
+  height: 48px;
+  border-radius: 50%;
+  border: none;
+  background: var(--bg-surface);
+  color: var(--text-secondary);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+  transition: all 0.2s ease;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+}
+
+.voice-btn:hover:not(:disabled) {
+  background: var(--bg-sidebar-hover);
+  color: var(--text-primary);
+  transform: translateY(-2px);
+  box-shadow: 0 6px 16px rgba(0, 0, 0, 0.4);
+}
+
+.voice-btn:disabled {
+  cursor: not-allowed;
+  opacity: 0.7;
+}
+
+/* Recording state - pulsing red glow */
+@keyframes pulse-red {
+  0%, 100% {
+    box-shadow: 0 0 0 0 rgba(243, 139, 168, 0.7);
+  }
+  50% {
+    box-shadow: 0 0 0 12px rgba(243, 139, 168, 0);
+  }
+}
+
+.voice-btn.recording {
+  background: var(--danger);
+  color: white;
+  animation: pulse-red 1.5s ease-in-out infinite;
+}
+
+/* Processing state - spinner */
+.voice-btn.processing svg .spinner-path {
+  animation: spin 1s linear infinite;
+  transform-origin: center;
+}
+
+/* Transcript popup */
+.voice-transcript {
+  position: fixed;
+  bottom: 80px;
+  right: 20px;
+  max-width: 300px;
+  padding: 12px 16px;
+  background: var(--bg-surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  color: var(--text-primary);
+  font-size: 13px;
+  line-height: 1.4;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+  z-index: 999;
+  animation: fadeIn 0.2s ease, fadeOut 0.5s ease 2.5s;
+}
+
+@keyframes fadeOut {
+  to {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+}

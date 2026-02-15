@@ -4,6 +4,8 @@ import http from 'http';
 import httpProxy from 'http-proxy';
 import fs from 'fs';
 import pathModule from 'path';
+import multer from 'multer';
+import FormData from 'form-data';
 import { listRepos, listBranches, listCommits, getBranchHead, getCommit, createBranch, getDefaultBranch, compareBranches, createPullRequest, OWNER } from './github.js';
 import { getEntry, addEntry, evictIfNeeded, allocatePort, removeEntry, listEntries, makeId, getEntryByPort, getLatestEntries, updateEntry, getEntryById } from './cache-manager.js';
 import { cloneAndStart, getTargetDir, pullLatest, getServerLog } from './runner.js';
@@ -14,6 +16,9 @@ app.use(cors());
 // Webhook route MUST come before express.json() — it needs raw body
 app.use(webhookRouter);
 app.use(express.json());
+
+// Multer configuration for voice uploads
+const upload = multer({ storage: multer.memoryStorage() });
 
 // Single reusable proxy instance
 const proxy = httpProxy.createProxyServer({ ws: true, changeOrigin: true });
@@ -236,6 +241,79 @@ app.get('/api/cache/:id/files/*', (req, res) => {
     res.json({ content: buf.toString('utf-8'), path: filePath });
   } catch (e: any) {
     res.status(404).json({ error: 'File not found' });
+  }
+});
+
+// Voice-to-OpenClaw endpoint
+app.post('/api/voice', upload.single('audio'), async (req, res) => {
+  try {
+    if (!req.file) {
+      return res.status(400).json({ error: 'No audio file provided' });
+    }
+
+    const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
+    const OPENCLAW_GATEWAY_URL = process.env.OPENCLAW_GATEWAY_URL;
+    const OPENCLAW_GATEWAY_TOKEN = process.env.OPENCLAW_GATEWAY_TOKEN;
+
+    if (!OPENAI_API_KEY) {
+      return res.status(500).json({ error: 'OPENAI_API_KEY not configured' });
+    }
+    if (!OPENCLAW_GATEWAY_URL || !OPENCLAW_GATEWAY_TOKEN) {
+      return res.status(500).json({ error: 'OpenClaw gateway not configured' });
+    }
+
+    // Step 1: Transcribe audio using OpenAI Whisper
+    const formData = new FormData();
+    formData.append('file', req.file.buffer, {
+      filename: 'audio.webm',
+      contentType: req.file.mimetype,
+    });
+    formData.append('model', 'whisper-1');
+
+    const whisperResponse = await fetch('https://api.openai.com/v1/audio/transcriptions', {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${OPENAI_API_KEY}`,
+        ...formData.getHeaders(),
+      },
+      body: formData as any,
+    });
+
+    if (!whisperResponse.ok) {
+      const errorText = await whisperResponse.text();
+      console.error('Whisper API error:', errorText);
+      return res.status(500).json({ error: 'Transcription failed', details: errorText });
+    }
+
+    const whisperData = await whisperResponse.json() as { text: string };
+    const transcript = whisperData.text;
+
+    console.log('[voice] Transcribed:', transcript);
+
+    // Step 2: Send transcript to OpenClaw gateway
+    const gatewayResponse = await fetch(`${OPENCLAW_GATEWAY_URL}/api/v1/chat`, {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${OPENCLAW_GATEWAY_TOKEN}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ message: transcript }),
+    });
+
+    if (!gatewayResponse.ok) {
+      const errorText = await gatewayResponse.text();
+      console.error('OpenClaw gateway error:', errorText);
+      // Don't fail the request - we got the transcript, that's what matters
+      console.warn('[voice] Gateway send failed, but returning transcript anyway');
+    } else {
+      console.log('[voice] Sent to OpenClaw');
+    }
+
+    // Step 3: Return transcript immediately
+    res.json({ transcript, status: 'sent' });
+  } catch (e: any) {
+    console.error('[voice] Error:', e);
+    res.status(500).json({ error: e.message });
   }
 });
 

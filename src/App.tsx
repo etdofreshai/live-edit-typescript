@@ -1,5 +1,6 @@
 import React, { useEffect, useState, useRef } from 'react';
 import './styles.css';
+import { VoiceButton } from './VoiceButton';
 
 interface CacheEntry {
   id: string; repo: string; sha: string; port: number; lastAccessed: number;
@@ -861,6 +862,8 @@ export default function App() {
           </div>
         </div>
       )}
+
+      <VoiceButton />
     </div>
   );
 }
