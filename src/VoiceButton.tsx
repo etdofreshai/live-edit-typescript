@@ -1,13 +1,12 @@
-import React, { useState, useRef, useCallback, useEffect } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import { soundStartRecord, soundStopRecord, soundTranscribed, soundSent, soundError } from './sounds';
 
-type MessageStatus = 'transcribing' | 'sending' | 'sent' | 'error';
-
-interface QueuedMessage {
-  id: number;
+interface VoiceJob {
+  id: string;
+  status: 'transcribing' | 'sending' | 'sent' | 'error';
   text: string;
-  status: MessageStatus;
-  startedAt: number; // ms timestamp
+  startedAt: number;
+  error?: string;
 }
 
 interface VoiceContext {
@@ -15,27 +14,6 @@ interface VoiceContext {
   repo?: string;
   branch?: string;
   sha?: string;
-}
-
-const STORAGE_KEY = 'voice-messages';
-let nextId = Date.now();
-
-function loadMessages(): QueuedMessage[] {
-  try {
-    const raw = localStorage.getItem(STORAGE_KEY);
-    if (!raw) return [];
-    const msgs: QueuedMessage[] = JSON.parse(raw);
-    // Only restore in-flight messages (transcribing/sending)
-    return msgs.filter(m => m.status === 'transcribing' || m.status === 'sending');
-  } catch { return []; }
-}
-
-function saveMessages(msgs: QueuedMessage[]) {
-  try {
-    // Only persist in-flight messages
-    const toSave = msgs.filter(m => m.status === 'transcribing' || m.status === 'sending');
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(toSave));
-  } catch {}
 }
 
 function formatElapsed(ms: number): string {
@@ -57,71 +35,52 @@ function ElapsedTimer({ startedAt }: { startedAt: number }) {
 
 export function VoiceButton({ context }: { context?: VoiceContext }) {
   const [recording, setRecording] = useState(false);
-  const [messages, setMessages] = useState<QueuedMessage[]>(loadMessages);
+  const [jobs, setJobs] = useState<VoiceJob[]>([]);
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const chunksRef = useRef<Blob[]>([]);
-  const contextRef = useRef(context);
-  contextRef.current = context;
+  const prevStatusRef = useRef<Map<string, string>>(new Map());
 
-  // Persist messages on change
-  useEffect(() => { saveMessages(messages); }, [messages]);
+  // Poll server for job status
+  useEffect(() => {
+    const poll = async () => {
+      try {
+        const res = await fetch(`${import.meta.env.BASE_URL}api/voice/jobs`);
+        if (res.ok) {
+          const serverJobs: VoiceJob[] = await res.json();
+          
+          // Play sounds on status transitions
+          for (const job of serverJobs) {
+            const prev = prevStatusRef.current.get(job.id);
+            if (prev !== job.status) {
+              if (job.status === 'sending' && prev === 'transcribing') soundTranscribed();
+              if (job.status === 'sent') soundSent();
+              if (job.status === 'error') soundError();
+            }
+            prevStatusRef.current.set(job.id, job.status);
+          }
+          
+          // Clean up tracking for removed jobs
+          const jobIds = new Set(serverJobs.map(j => j.id));
+          for (const id of prevStatusRef.current.keys()) {
+            if (!jobIds.has(id)) prevStatusRef.current.delete(id);
+          }
 
-  const updateMsg = useCallback((id: number, update: Partial<QueuedMessage>) => {
-    setMessages(prev => prev.map(m => m.id === id ? { ...m, ...update } : m));
+          setJobs(serverJobs);
+        }
+      } catch {}
+    };
+
+    poll(); // initial
+    const iv = setInterval(poll, 1000);
+    return () => clearInterval(iv);
   }, []);
 
-  const removeMsg = useCallback((id: number) => {
-    setMessages(prev => prev.filter(m => m.id !== id));
-  }, []);
-
-  const processAudio = useCallback(async (audioBlob: Blob) => {
-    const id = nextId++;
-    const msg: QueuedMessage = { id, text: '', status: 'transcribing', startedAt: Date.now() };
-    setMessages(prev => [...prev, msg]);
-
+  const dismissJob = async (id: string) => {
     try {
-      // Transcribe
-      const formData = new FormData();
-      formData.append('audio', audioBlob, 'recording.webm');
-      const transcribeRes = await fetch(`${import.meta.env.BASE_URL}api/voice/transcribe`, {
-        method: 'POST', body: formData,
-      });
-      if (!transcribeRes.ok) throw new Error(`Transcription failed: ${transcribeRes.status}`);
-      const { transcript: text } = await transcribeRes.json();
-
-      if (!text?.trim()) {
-        updateMsg(id, { text: '(no speech detected)', status: 'error' });
-        soundError();
-        setTimeout(() => removeMsg(id), 3000);
-        return;
-      }
-
-      updateMsg(id, { text: `"${text}"`, status: 'sending' });
-      soundTranscribed();
-
-      // Send to OpenClaw
-      const sendRes = await fetch(`${import.meta.env.BASE_URL}api/voice/send`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ text, context: contextRef.current }),
-      });
-
-      if (!sendRes.ok) {
-        updateMsg(id, { status: 'error' });
-        soundError();
-        setTimeout(() => removeMsg(id), 4000);
-      } else {
-        updateMsg(id, { status: 'sent' });
-        soundSent();
-        setTimeout(() => removeMsg(id), 2500);
-      }
-    } catch (err) {
-      console.error('Voice error:', err);
-      updateMsg(id, { text: '⚠ Error', status: 'error' });
-      soundError();
-      setTimeout(() => removeMsg(id), 3000);
-    }
-  }, [updateMsg, removeMsg]);
+      await fetch(`${import.meta.env.BASE_URL}api/voice/jobs/${id}`, { method: 'DELETE' });
+      setJobs(prev => prev.filter(j => j.id !== id));
+    } catch {}
+  };
 
   const startRecording = async () => {
     try {
@@ -133,10 +92,22 @@ export function VoiceButton({ context }: { context?: VoiceContext }) {
         if (e.data.size > 0) chunksRef.current.push(e.data);
       };
 
-      mediaRecorder.onstop = () => {
+      mediaRecorder.onstop = async () => {
         stream.getTracks().forEach(t => t.stop());
         const audioBlob = new Blob(chunksRef.current, { type: 'audio/webm' });
-        processAudio(audioBlob);
+        
+        // Send to server — job is created server-side
+        const formData = new FormData();
+        formData.append('audio', audioBlob, 'recording.webm');
+        if (context) formData.append('context', JSON.stringify(context));
+        
+        try {
+          await fetch(`${import.meta.env.BASE_URL}api/voice`, {
+            method: 'POST', body: formData,
+          });
+        } catch (err) {
+          console.error('Failed to submit voice:', err);
+        }
       };
 
       mediaRecorder.start();
@@ -176,20 +147,23 @@ export function VoiceButton({ context }: { context?: VoiceContext }) {
         </svg>
       </button>
 
-      {messages.length > 0 && (
+      {jobs.length > 0 && (
         <div className="voice-queue">
-          {messages.map(m => (
-            <div key={m.id} className={`voice-msg ${m.status}`}>
+          {jobs.map(j => (
+            <div key={j.id} className={`voice-msg ${j.status}`}>
               <span className="voice-msg-icon">
-                {(m.status === 'transcribing' || m.status === 'sending') && <span className="voice-spinner" />}
-                {m.status === 'sent' && <span className="voice-check">✓</span>}
-                {m.status === 'error' && <span className="voice-error-icon">✕</span>}
+                {(j.status === 'transcribing' || j.status === 'sending') && <span className="voice-spinner" />}
+                {j.status === 'sent' && <span className="voice-check">✓</span>}
+                {j.status === 'error' && <span className="voice-error-icon">✕</span>}
               </span>
               <span className="voice-msg-text">
-                {m.status === 'transcribing' ? 'Transcribing...' : m.text}
+                {j.status === 'transcribing' ? 'Transcribing...' : j.text || j.error || ''}
               </span>
-              {(m.status === 'transcribing' || m.status === 'sending') && (
-                <ElapsedTimer startedAt={m.startedAt} />
+              {(j.status === 'transcribing' || j.status === 'sending') && (
+                <ElapsedTimer startedAt={j.startedAt} />
+              )}
+              {(j.status === 'sent' || j.status === 'error') && (
+                <button className="voice-msg-dismiss" onClick={() => dismissJob(j.id)} title="Dismiss">✕</button>
               )}
             </div>
           ))}

@@ -305,6 +305,8 @@ body {
 .voice-check { color: var(--accent-green); font-weight: 700; font-size: 15px; }
 .voice-error-icon { color: var(--danger); font-weight: 700; font-size: 15px; }
 .voice-msg-timer { flex-shrink: 0; font-size: 11px; color: var(--text-muted); font-family: 'SF Mono', 'Cascadia Code', monospace; margin-left: auto; padding-left: 8px; }
+.voice-msg-dismiss { flex-shrink: 0; background: none; border: none; color: var(--text-muted); cursor: pointer; font-size: 12px; padding: 0 2px; margin-left: auto; opacity: 0.5; transition: opacity 0.15s; }
+.voice-msg-dismiss:hover { opacity: 1; color: var(--text-primary); }
 
 @keyframes voiceFadeOut {
   0% { opacity: 1; transform: translateY(0); }

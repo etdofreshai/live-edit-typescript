@@ -244,79 +244,123 @@ app.get('/api/cache/:id/files/*', (req, res) => {
   }
 });
 
-// Voice Step 1: Transcribe audio via Whisper
-app.post('/api/voice/transcribe', upload.single('audio'), async (req, res) => {
-  try {
-    if (!req.file) return res.status(400).json({ error: 'No audio file provided' });
+// ─── Voice Jobs (server-side state) ───
+interface VoiceJob {
+  id: string;
+  status: 'transcribing' | 'sending' | 'sent' | 'error';
+  text: string;
+  startedAt: number;
+  error?: string;
+}
 
-    const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
-    if (!OPENAI_API_KEY) return res.status(500).json({ error: 'OPENAI_API_KEY not configured' });
+const voiceJobs: Map<string, VoiceJob> = new Map();
 
-    const blob = new Blob([new Uint8Array(req.file.buffer)], { type: req.file.mimetype || 'audio/webm' });
-    const formData = new FormData();
-    formData.append('file', blob, 'audio.webm');
-    formData.append('model', 'whisper-1');
-
-    const whisperRes = await fetch('https://api.openai.com/v1/audio/transcriptions', {
-      method: 'POST',
-      headers: { 'Authorization': `Bearer ${OPENAI_API_KEY}` },
-      body: formData,
-    });
-
-    if (!whisperRes.ok) {
-      const err = await whisperRes.text();
-      console.error('Whisper API error:', err);
-      return res.status(500).json({ error: 'Transcription failed', details: err });
+// Clean up old completed jobs after 30s
+setInterval(() => {
+  const now = Date.now();
+  for (const [id, job] of voiceJobs) {
+    if ((job.status === 'sent' || job.status === 'error') && now - job.startedAt > 30_000) {
+      voiceJobs.delete(id);
     }
-
-    const { text } = await whisperRes.json() as { text: string };
-    console.log('[voice] Transcribed:', text);
-    res.json({ transcript: text });
-  } catch (e: any) {
-    console.error('[voice/transcribe] Error:', e);
-    res.status(500).json({ error: e.message });
   }
+}, 5000);
+
+// GET /api/voice/jobs — poll current job states
+app.get('/api/voice/jobs', (_req, res) => {
+  res.json(Array.from(voiceJobs.values()));
 });
 
-// Voice Step 2: Send text to OpenClaw gateway
-app.post('/api/voice/send', async (req, res) => {
-  try {
-    const { text, context } = req.body;
-    if (!text) return res.status(400).json({ error: 'No text provided' });
+// DELETE /api/voice/jobs/:id — dismiss a job
+app.delete('/api/voice/jobs/:id', (req, res) => {
+  voiceJobs.delete(req.params.id);
+  res.json({ ok: true });
+});
 
-    const OPENCLAW_GATEWAY_URL = process.env.OPENCLAW_GATEWAY_URL;
-    const OPENCLAW_GATEWAY_TOKEN = process.env.OPENCLAW_GATEWAY_TOKEN;
-    if (!OPENCLAW_GATEWAY_URL || !OPENCLAW_GATEWAY_TOKEN) {
-      return res.status(500).json({ error: 'OpenClaw gateway not configured' });
+// POST /api/voice — upload audio, creates a job, processes async
+app.post('/api/voice', upload.single('audio'), (req, res) => {
+  if (!req.file) return res.status(400).json({ error: 'No audio file provided' });
+
+  const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
+  if (!OPENAI_API_KEY) return res.status(500).json({ error: 'OPENAI_API_KEY not configured' });
+
+  const context = req.body.context ? JSON.parse(req.body.context) : undefined;
+  const jobId = `voice-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
+  const job: VoiceJob = { id: jobId, status: 'transcribing', text: '', startedAt: Date.now() };
+  voiceJobs.set(jobId, job);
+
+  // Return job ID immediately
+  res.json({ jobId });
+
+  // Process async
+  (async () => {
+    try {
+      // Step 1: Transcribe
+      const blob = new Blob([new Uint8Array(req.file!.buffer)], { type: req.file!.mimetype || 'audio/webm' });
+      const formData = new FormData();
+      formData.append('file', blob, 'audio.webm');
+      formData.append('model', 'whisper-1');
+
+      const whisperRes = await fetch('https://api.openai.com/v1/audio/transcriptions', {
+        method: 'POST',
+        headers: { 'Authorization': `Bearer ${OPENAI_API_KEY}` },
+        body: formData,
+      });
+
+      if (!whisperRes.ok) {
+        const err = await whisperRes.text();
+        console.error('Whisper API error:', err);
+        job.status = 'error'; job.error = 'Transcription failed';
+        return;
+      }
+
+      const { text } = await whisperRes.json() as { text: string };
+      console.log('[voice] Transcribed:', text);
+
+      if (!text?.trim()) {
+        job.status = 'error'; job.text = '(no speech detected)';
+        return;
+      }
+
+      job.text = `"${text}"`;
+      job.status = 'sending';
+
+      // Step 2: Send to OpenClaw
+      const OPENCLAW_GATEWAY_URL = process.env.OPENCLAW_GATEWAY_URL;
+      const OPENCLAW_GATEWAY_TOKEN = process.env.OPENCLAW_GATEWAY_TOKEN;
+      if (!OPENCLAW_GATEWAY_URL || !OPENCLAW_GATEWAY_TOKEN) {
+        job.status = 'error'; job.error = 'Gateway not configured';
+        return;
+      }
+
+      const gatewayRes = await fetch(`${OPENCLAW_GATEWAY_URL}/v1/chat/completions`, {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${OPENCLAW_GATEWAY_TOKEN}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          model: 'openclaw:main',
+          messages: [{ role: 'user', content: context?.repo
+            ? `[Live Edit: ${context.owner || 'etdofreshai'}/${context.repo}${context.branch ? ` @ ${context.branch}` : ''}${context.sha ? ` (${context.sha.slice(0, 7)})` : ''}]\n[If you make changes, commit and push to the repo.]\n\n${text}`
+            : text
+          }],
+        }),
+      });
+
+      if (!gatewayRes.ok) {
+        const err = await gatewayRes.text();
+        console.error('OpenClaw gateway error:', err);
+        job.status = 'error'; job.error = 'Gateway send failed';
+        return;
+      }
+
+      console.log('[voice] Sent to OpenClaw:', text.slice(0, 50));
+      job.status = 'sent';
+    } catch (e: any) {
+      console.error('[voice] Error:', e);
+      job.status = 'error'; job.error = e.message;
     }
-
-    const gatewayRes = await fetch(`${OPENCLAW_GATEWAY_URL}/v1/chat/completions`, {
-      method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${OPENCLAW_GATEWAY_TOKEN}`,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        model: 'openclaw:main',
-        messages: [{ role: 'user', content: context?.repo
-          ? `[Live Edit: ${context.owner || 'etdofreshai'}/${context.repo}${context.branch ? ` @ ${context.branch}` : ''}${context.sha ? ` (${context.sha.slice(0, 7)})` : ''}]\n[If you make changes, commit and push to the repo.]\n\n${text}`
-          : text
-        }],
-      }),
-    });
-
-    if (!gatewayRes.ok) {
-      const err = await gatewayRes.text();
-      console.error('OpenClaw gateway error:', err);
-      return res.status(502).json({ error: 'Gateway send failed', details: err });
-    }
-
-    console.log('[voice] Sent to OpenClaw:', text.slice(0, 50));
-    res.json({ status: 'sent' });
-  } catch (e: any) {
-    console.error('[voice/send] Error:', e);
-    res.status(500).json({ error: e.message });
-  }
+  })();
 });
 
 // SHA endpoint for live-reload polling
