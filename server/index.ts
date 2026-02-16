@@ -271,9 +271,9 @@ const voiceJobs: Map<string, VoiceJob> = new Map();
 // Screenshot store for serving to OpenClaw
 const screenshotStore: Map<string, { buffer: Buffer; created: number }> = new Map();
 
-// Clean up old screenshots after 5 min
+// Clean up old screenshots after 30 min
 setInterval(() => {
-  const cutoff = Date.now() - 5 * 60 * 1000;
+  const cutoff = Date.now() - 30 * 60 * 1000;
   for (const [id, ss] of screenshotStore) {
     if (ss.created < cutoff) screenshotStore.delete(id);
   }
