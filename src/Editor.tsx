@@ -125,7 +125,7 @@ export default function Editor({ initialOwner, initialRepo, initialBranch, initi
     if (currentPath !== path) {
       onNavigateRef.current(path);
     }
-  }, [selectedRepo, selectedBranch, activeEntry?.sha, restoringState]);
+  }, [selectedRepo, selectedBranch, activeEntry?.sha, restoringState, urlUsedLatest]);
 
   // Handle initial commit from URL
   useEffect(() => {
