@@ -539,7 +539,7 @@ export default function Editor({ initialOwner, initialRepo, initialBranch, initi
                 <span style={{ color: '#555', margin: '0 2px' }}>/</span>
               </span>
               <span className="tb-repo">
-                <a href={`https://github.com/etdofreshai/${activeEntry.repo}`} target="_blank" rel="noopener noreferrer" style={{ color: '#cdd6f4', textDecoration: 'none' }}>{activeEntry.repo}</a>
+                <a href={`https://github.com/etdofreshai/${activeEntry.repo}`} target="_blank" rel="noopener noreferrer" style={{ color: '#cdd6f4', textDecoration: 'none' }}>etdofreshai/{activeEntry.repo}</a>
               </span>
               {activeEntry.branch && (
                 <span className="tb-branch">
