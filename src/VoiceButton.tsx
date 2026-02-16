@@ -77,6 +77,7 @@ export function VoiceButton({ context, iframeRef, consoleLogs }: VoiceButtonProp
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const chunksRef = useRef<Blob[]>([]);
   const prevStatusRef = useRef<Map<string, string>>(new Map());
+  const screenshotUrls = useRef<Map<string, string>>(new Map());
 
   // Poll server for job status
   useEffect(() => {
@@ -116,6 +117,8 @@ export function VoiceButton({ context, iframeRef, consoleLogs }: VoiceButtonProp
   const dismissJob = async (id: string) => {
     try {
       await fetch(`${import.meta.env.BASE_URL}api/voice/jobs/${id}`, { method: 'DELETE' });
+      const url = screenshotUrls.current.get(id);
+      if (url) { URL.revokeObjectURL(url); screenshotUrls.current.delete(id); }
       setJobs(prev => prev.filter(j => j.id !== id));
     } catch {}
   };
@@ -150,9 +153,15 @@ export function VoiceButton({ context, iframeRef, consoleLogs }: VoiceButtonProp
         }
         
         try {
-          await fetch(`${import.meta.env.BASE_URL}api/voice`, {
+          const res = await fetch(`${import.meta.env.BASE_URL}api/voice`, {
             method: 'POST', body: formData,
           });
+          if (res.ok && screenshotBlob) {
+            const { jobId } = await res.json();
+            if (jobId) {
+              screenshotUrls.current.set(jobId, URL.createObjectURL(screenshotBlob));
+            }
+          }
         } catch (err) {
           console.error('Failed to submit voice:', err);
         }
@@ -199,6 +208,13 @@ export function VoiceButton({ context, iframeRef, consoleLogs }: VoiceButtonProp
         <div className="voice-queue">
           {jobs.map(j => (
             <div key={j.id} className={`voice-msg ${j.status}`}>
+              {screenshotUrls.current.has(j.id) && (
+                <img
+                  src={screenshotUrls.current.get(j.id)}
+                  alt="screenshot"
+                  style={{ width: 48, height: 36, objectFit: 'cover', borderRadius: 4, flexShrink: 0, border: '1px solid #3a3a5e' }}
+                />
+              )}
               <span className="voice-msg-icon">
                 {(j.status === 'transcribing' || j.status === 'sending') && <span className="voice-spinner" />}
                 {j.status === 'sent' && <span className="voice-check">✓</span>}
