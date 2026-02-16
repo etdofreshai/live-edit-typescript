@@ -664,7 +664,7 @@ export default function Editor({ initialOwner, initialRepo, initialBranch, initi
 
         {commits.length > 0 && <>
           <h3 style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
-            <span>Commits — {selectedBranch}</span>
+            <span>Commits — {selectedRepo} / {selectedBranch}</span>
             {compareInfo && compareInfo.ahead > 0 && (
               <span style={{ fontSize: 11, background: '#89b4fa22', color: '#89b4fa', padding: '2px 8px', borderRadius: 10, fontWeight: 500 }}>
                 {compareInfo.ahead} ahead
