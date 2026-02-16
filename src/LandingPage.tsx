@@ -262,9 +262,23 @@ export default function LandingPage() {
           fontFamily: 'monospace',
           lineHeight: 1.8,
         }}>
-          <span>{gitInfo.owner}/{gitInfo.repo}</span>
+          <a
+            href={`https://github.com/${gitInfo.owner}/${gitInfo.repo}`}
+            target="_blank"
+            rel="noopener noreferrer"
+            style={{ color: '#4a4a6a', textDecoration: 'none' }}
+            onMouseEnter={e => e.currentTarget.style.color = '#89b4fa'}
+            onMouseLeave={e => e.currentTarget.style.color = '#4a4a6a'}
+          >{gitInfo.owner}/{gitInfo.repo}</a>
           {' · '}
-          <span>{gitInfo.branch}</span>
+          <a
+            href={`https://github.com/${gitInfo.owner}/${gitInfo.repo}/tree/${gitInfo.branch}`}
+            target="_blank"
+            rel="noopener noreferrer"
+            style={{ color: '#4a4a6a', textDecoration: 'none' }}
+            onMouseEnter={e => e.currentTarget.style.color = '#89b4fa'}
+            onMouseLeave={e => e.currentTarget.style.color = '#4a4a6a'}
+          >{gitInfo.branch}</a>
           {' · '}
           <a
             href={`https://github.com/${gitInfo.owner}/${gitInfo.repo}/commit/${gitInfo.sha}`}
