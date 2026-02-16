@@ -1,4 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react';
+import html2canvas from 'html2canvas';
 import { soundStartRecord, soundStopRecord, soundTranscribed, soundSent, soundError } from './sounds';
 
 interface VoiceJob {
@@ -33,7 +34,13 @@ function ElapsedTimer({ startedAt }: { startedAt: number }) {
   return <span className="voice-msg-timer">{formatElapsed(now - startedAt)}</span>;
 }
 
-export function VoiceButton({ context }: { context?: VoiceContext }) {
+interface VoiceButtonProps {
+  context?: VoiceContext;
+  iframeRef?: React.RefObject<HTMLIFrameElement>;
+  consoleLogs?: string[];
+}
+
+export function VoiceButton({ context, iframeRef, consoleLogs }: VoiceButtonProps) {
   const [recording, setRecording] = useState(false);
   const [jobs, setJobs] = useState<VoiceJob[]>([]);
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
@@ -96,10 +103,31 @@ export function VoiceButton({ context }: { context?: VoiceContext }) {
         stream.getTracks().forEach(t => t.stop());
         const audioBlob = new Blob(chunksRef.current, { type: 'audio/webm' });
         
+        // Capture screenshot if iframe is available
+        let screenshotBlob: Blob | null = null;
+        if (iframeRef?.current) {
+          try {
+            const canvas = await html2canvas(iframeRef.current, {
+              allowTaint: true,
+              useCORS: true,
+              backgroundColor: '#1a1a2e',
+            });
+            screenshotBlob = await new Promise<Blob>((resolve) => {
+              canvas.toBlob((blob) => resolve(blob!), 'image/png');
+            });
+          } catch (err) {
+            console.warn('Failed to capture screenshot:', err);
+          }
+        }
+        
         // Send to server — job is created server-side
         const formData = new FormData();
         formData.append('audio', audioBlob, 'recording.webm');
         if (context) formData.append('context', JSON.stringify(context));
+        if (screenshotBlob) formData.append('screenshot', screenshotBlob, 'screenshot.png');
+        if (consoleLogs && consoleLogs.length > 0) {
+          formData.append('consoleLogs', JSON.stringify(consoleLogs));
+        }
         
         try {
           await fetch(`${import.meta.env.BASE_URL}api/voice`, {

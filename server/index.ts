@@ -17,7 +17,7 @@ app.use(cors());
 app.use(webhookRouter);
 app.use(express.json());
 
-// Multer configuration for voice uploads
+// Multer configuration for voice uploads (audio + optional screenshot)
 const upload = multer({ storage: multer.memoryStorage() });
 
 // Single reusable proxy instance
@@ -276,14 +276,19 @@ app.delete('/api/voice/jobs/:id', (req, res) => {
   res.json({ ok: true });
 });
 
-// POST /api/voice — upload audio, creates a job, processes async
-app.post('/api/voice', upload.single('audio'), (req, res) => {
-  if (!req.file) return res.status(400).json({ error: 'No audio file provided' });
+// POST /api/voice — upload audio + optional screenshot, creates a job, processes async
+app.post('/api/voice', upload.fields([{ name: 'audio', maxCount: 1 }, { name: 'screenshot', maxCount: 1 }]), (req, res) => {
+  const files = req.files as { [fieldname: string]: Express.Multer.File[] };
+  if (!files?.audio?.[0]) return res.status(400).json({ error: 'No audio file provided' });
 
   const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
   if (!OPENAI_API_KEY) return res.status(500).json({ error: 'OPENAI_API_KEY not configured' });
 
   const context = req.body.context ? JSON.parse(req.body.context) : undefined;
+  const consoleLogs = req.body.consoleLogs ? JSON.parse(req.body.consoleLogs) : undefined;
+  const audioFile = files.audio[0];
+  const screenshotFile = files.screenshot?.[0];
+  
   const jobId = `voice-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
   const job: VoiceJob = { id: jobId, status: 'transcribing', text: '', startedAt: Date.now() };
   voiceJobs.set(jobId, job);
@@ -295,7 +300,7 @@ app.post('/api/voice', upload.single('audio'), (req, res) => {
   (async () => {
     try {
       // Step 1: Transcribe
-      const blob = new Blob([new Uint8Array(req.file!.buffer)], { type: req.file!.mimetype || 'audio/webm' });
+      const blob = new Blob([new Uint8Array(audioFile.buffer)], { type: audioFile.mimetype || 'audio/webm' });
       const formData = new FormData();
       formData.append('file', blob, 'audio.webm');
       formData.append('model', 'whisper-1');
@@ -332,6 +337,42 @@ app.post('/api/voice', upload.single('audio'), (req, res) => {
         return;
       }
 
+      // Build message content
+      let messageContent: any = text;
+      
+      // If we have a screenshot, use the OpenAI vision message format
+      if (screenshotFile) {
+        const screenshotBase64 = screenshotFile.buffer.toString('base64');
+        const screenshotDataUrl = `data:image/png;base64,${screenshotBase64}`;
+        
+        let textContent = text;
+        
+        // Add context prefix
+        if (context?.repo) {
+          textContent = `[Live Edit: ${context.owner || 'etdofreshai'}/${context.repo}${context.branch ? ` @ ${context.branch}` : ''}${context.sha ? ` (${context.sha.slice(0, 7)})` : ''}]\n[If you make changes, commit and push to the repo.]\n\n${text}`;
+        }
+        
+        // Append console logs if available
+        if (consoleLogs && consoleLogs.length > 0) {
+          textContent += `\n\n**Console logs (last ${consoleLogs.length} entries):**\n${consoleLogs.join('\n')}`;
+        }
+        
+        messageContent = [
+          { type: 'text', text: textContent },
+          { type: 'image_url', image_url: { url: screenshotDataUrl } }
+        ];
+      } else {
+        // Text-only message
+        if (context?.repo) {
+          messageContent = `[Live Edit: ${context.owner || 'etdofreshai'}/${context.repo}${context.branch ? ` @ ${context.branch}` : ''}${context.sha ? ` (${context.sha.slice(0, 7)})` : ''}]\n[If you make changes, commit and push to the repo.]\n\n${text}`;
+        }
+        
+        // Append console logs if available
+        if (consoleLogs && consoleLogs.length > 0) {
+          messageContent += `\n\n**Console logs (last ${consoleLogs.length} entries):**\n${consoleLogs.join('\n')}`;
+        }
+      }
+
       const gatewayRes = await fetch(`${OPENCLAW_GATEWAY_URL}/v1/chat/completions`, {
         method: 'POST',
         headers: {
@@ -340,10 +381,7 @@ app.post('/api/voice', upload.single('audio'), (req, res) => {
         },
         body: JSON.stringify({
           model: 'openclaw:main',
-          messages: [{ role: 'user', content: context?.repo
-            ? `[Live Edit: ${context.owner || 'etdofreshai'}/${context.repo}${context.branch ? ` @ ${context.branch}` : ''}${context.sha ? ` (${context.sha.slice(0, 7)})` : ''}]\n[If you make changes, commit and push to the repo.]\n\n${text}`
-            : text
-          }],
+          messages: [{ role: 'user', content: messageContent }],
         }),
       });
 

@@ -1,6 +1,7 @@
 import React, { useEffect, useState, useRef } from 'react';
 import './styles.css';
 import { VoiceButton } from './VoiceButton';
+import { IframeWithRetry } from './IframeWithRetry';
 
 interface CacheEntry {
   id: string; repo: string; sha: string; port: number; lastAccessed: number;
@@ -36,106 +37,6 @@ function savePersistedState(state: PersistedState) {
 }
 
 const api = (path: string, opts?: RequestInit) => fetch(path, opts).then(r => r.json());
-
-function IframeWithRetry({ port, cacheId }: { port: number; cacheId?: string }) {
-  const [ready, setReady] = useState(false);
-  const [retryCount, setRetryCount] = useState(0);
-  const [serverLog, setServerLog] = useState('');
-  const [showLog, setShowLog] = useState(false);
-  const [cancelled, setCancelled] = useState(false);
-  const [timedOut, setTimedOut] = useState(false);
-  const maxRetries = 30;
-  const cancelledRef = useRef(false);
-
-  useEffect(() => {
-    setReady(false);
-    setRetryCount(0);
-    setCancelled(false);
-    setTimedOut(false);
-    setServerLog('');
-    cancelledRef.current = false;
-
-    const poll = async () => {
-      for (let i = 0; i < maxRetries; i++) {
-        if (cancelledRef.current) return;
-        try {
-          const res = await fetch(`/proxy/${port}/`, { method: 'HEAD' });
-          if (res.ok) {
-            if (!cancelledRef.current) setReady(true);
-            return;
-          }
-        } catch {}
-        if (!cancelledRef.current) {
-          setRetryCount(i + 1);
-          // Fetch server log every 5 attempts
-          if (cacheId && (i + 1) % 3 === 0) {
-            try {
-              const data = await fetch(`/api/cache/${cacheId}/log`).then(r => r.json());
-              if (data.log) setServerLog(data.log);
-            } catch {}
-          }
-        }
-        await new Promise(r => setTimeout(r, 2000));
-      }
-      if (!cancelledRef.current) {
-        setTimedOut(true);
-        // Fetch final log
-        if (cacheId) {
-          try {
-            const data = await fetch(`/api/cache/${cacheId}/log`).then(r => r.json());
-            if (data.log) setServerLog(data.log);
-          } catch {}
-        }
-      }
-    };
-    poll();
-    return () => { cancelledRef.current = true; };
-  }, [port, cacheId]);
-
-  if (!ready) {
-    return (
-      <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', height: '100%', color: '#6b7280', gap: 12, padding: 20 }}>
-        {cancelled ? (
-          <div>Cancelled</div>
-        ) : timedOut ? (
-          <>
-            <div style={{ color: '#f38ba8', fontSize: 16 }}>⚠ Server failed to start</div>
-            {serverLog && (
-              <pre style={{ maxWidth: '90%', maxHeight: 300, overflow: 'auto', background: '#16161e', color: '#cdd6f4', padding: 12, borderRadius: 6, fontSize: 12, fontFamily: 'monospace', whiteSpace: 'pre-wrap', textAlign: 'left', width: '100%' }}>
-                {serverLog}
-              </pre>
-            )}
-          </>
-        ) : (
-          <>
-            <div className="spinner" />
-            <div>Waiting for server on port {port}… {retryCount > 0 ? `(attempt ${retryCount}/${maxRetries})` : ''}</div>
-            <div style={{ display: 'flex', gap: 8 }}>
-              <button onClick={() => { setCancelled(true); cancelledRef.current = true; }} style={{ padding: '4px 16px', background: 'transparent', border: '1px solid #555', borderRadius: 6, color: '#999', cursor: 'pointer', fontSize: 13 }}>Cancel</button>
-              {cacheId && (
-                <button onClick={async () => { setShowLog(!showLog); if (!showLog && cacheId) { try { const d = await fetch(`/api/cache/${cacheId}/log`).then(r => r.json()); if (d.log) setServerLog(d.log); } catch {} } }} style={{ padding: '4px 16px', background: 'transparent', border: '1px solid #555', borderRadius: 6, color: '#999', cursor: 'pointer', fontSize: 13 }}>
-                  {showLog ? 'Hide Log' : 'Show Log'}
-                </button>
-              )}
-            </div>
-            {showLog && serverLog && (
-              <pre style={{ maxWidth: '90%', maxHeight: 200, overflow: 'auto', background: '#16161e', color: '#cdd6f4', padding: 12, borderRadius: 6, fontSize: 12, fontFamily: 'monospace', whiteSpace: 'pre-wrap', textAlign: 'left', width: '100%' }}>
-                {serverLog}
-              </pre>
-            )}
-          </>
-        )}
-      </div>
-    );
-  }
-
-  return (
-    <iframe
-      src={`/proxy/${port}/`}
-      style={{ background: '#1a1a2e' }}
-    />
-  );
-}
 
 function timeAgo(dateStr: string): string {
   const now = Date.now();
@@ -193,6 +94,8 @@ export default function Editor({ initialOwner, initialRepo, initialBranch, initi
   const [showHeader, setShowHeader] = useState(true);
   const [envText, setEnvText] = useState('');
   const [startMode, setStartMode] = useState<StartMode>('vite');
+  const [consoleLogs, setConsoleLogs] = useState<string[]>([]);
+  const iframeRef = useRef<HTMLIFrameElement>(null);
 
   const activeEntry = cache.find(e => e.id === activeEntryId) || (previewPort ? cache.find(e => e.port === previewPort) : null);
 
@@ -558,6 +461,67 @@ export default function Editor({ initialOwner, initialRepo, initialBranch, initi
     return () => clearInterval(interval);
   }, []);
 
+  // Console log interception for preview iframe
+  useEffect(() => {
+    if (!iframeRef.current || !previewPort) return;
+
+    const iframe = iframeRef.current;
+    const buffer: string[] = [];
+    
+    const setupConsoleInterception = () => {
+      try {
+        const iframeWindow = iframe.contentWindow;
+        if (!iframeWindow) return;
+
+        const originalConsole = {
+          log: iframeWindow.console.log,
+          warn: iframeWindow.console.warn,
+          error: iframeWindow.console.error,
+        };
+
+        const addToBuffer = (level: string, args: any[]) => {
+          const timestamp = new Date().toLocaleTimeString();
+          const message = `[${timestamp}] [${level}] ${args.map(arg => 
+            typeof arg === 'object' ? JSON.stringify(arg) : String(arg)
+          ).join(' ')}`;
+          buffer.push(message);
+          if (buffer.length > 30) buffer.shift();
+          setConsoleLogs([...buffer]);
+        };
+
+        iframeWindow.console.log = function(...args: any[]) {
+          addToBuffer('log', args);
+          originalConsole.log.apply(this, args);
+        };
+
+        iframeWindow.console.warn = function(...args: any[]) {
+          addToBuffer('warn', args);
+          originalConsole.warn.apply(this, args);
+        };
+
+        iframeWindow.console.error = function(...args: any[]) {
+          addToBuffer('error', args);
+          originalConsole.error.apply(this, args);
+        };
+      } catch (e) {
+        // Cross-origin iframe - can't access contentWindow
+        console.warn('Cannot intercept console logs: cross-origin iframe');
+      }
+    };
+
+    // Wait for iframe to load before setting up interception
+    const onLoad = () => setupConsoleInterception();
+    iframe.addEventListener('load', onLoad);
+    
+    // Also try immediately in case it's already loaded
+    setupConsoleInterception();
+
+    return () => {
+      iframe.removeEventListener('load', onLoad);
+      setConsoleLogs([]);
+    };
+  }, [previewPort, iframeRef.current]);
+
   const remove = async (id: string) => {
     await api(`/api/cache/${id}`, { method: 'DELETE' });
     refreshCache();
@@ -813,7 +777,7 @@ export default function Editor({ initialOwner, initialRepo, initialBranch, initi
             </div>
           )}
           {previewPort ? (
-            <IframeWithRetry key={`${activeEntryId}-${previewPort}`} port={previewPort} cacheId={activeEntryId || undefined} />
+            <IframeWithRetry ref={iframeRef} key={`${activeEntryId}-${previewPort}`} port={previewPort} cacheId={activeEntryId || undefined} />
           ) : null}
           {previewPort && (
             <div className="preview-fallback" style={{ display: 'none', alignItems: 'center', justifyContent: 'center', height: '100%', color: '#6c7086', fontSize: 14, flexDirection: 'column', gap: 8, position: 'absolute', inset: 0 }}>
@@ -978,7 +942,7 @@ export default function Editor({ initialOwner, initialRepo, initialBranch, initi
         </div>
       )}
 
-      {showHeader && <VoiceButton context={activeEntry ? { owner: 'etdofreshai', repo: activeEntry.repo, branch: activeEntry.branch, sha: activeEntry.sha } : undefined} />}
+      {showHeader && <VoiceButton context={activeEntry ? { owner: 'etdofreshai', repo: activeEntry.repo, branch: activeEntry.branch, sha: activeEntry.sha } : undefined} iframeRef={iframeRef} consoleLogs={consoleLogs} />}
     </div>
   );
 }

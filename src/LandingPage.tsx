@@ -7,6 +7,9 @@ interface Repo {
   description: string | null;
   updated_at: string;
   html_url: string;
+  owner: {
+    avatar_url: string;
+  };
 }
 
 const api = (path: string) => fetch(path).then(r => r.json());
@@ -128,14 +131,26 @@ export default function LandingPage() {
                 }}
               >
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 8 }}>
-                  <h3 style={{
-                    fontSize: 20,
-                    fontWeight: 600,
-                    margin: 0,
-                    color: '#cdd6f4',
-                  }}>
-                    {repo.name}
-                  </h3>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                    <img
+                      src={repo.owner.avatar_url}
+                      alt={`${repo.name} owner`}
+                      style={{
+                        width: 32,
+                        height: 32,
+                        borderRadius: '50%',
+                        border: '1px solid #3a3a5e',
+                      }}
+                    />
+                    <h3 style={{
+                      fontSize: 20,
+                      fontWeight: 600,
+                      margin: 0,
+                      color: '#cdd6f4',
+                    }}>
+                      {repo.name}
+                    </h3>
+                  </div>
                   <div style={{
                     fontSize: 13,
                     color: '#6b7280',
