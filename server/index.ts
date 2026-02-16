@@ -380,15 +380,15 @@ app.post('/api/voice', upload.fields([{ name: 'audio', maxCount: 1 }, { name: 's
         messageText += `\n\n**Console logs (last ${consoleLogs.length} entries):**\n${consoleLogs.join('\n')}`;
       }
 
-      // Build input items for OpenResponses API
-      const input: any[] = [
-        { type: 'message', role: 'user', content: messageText }
+      // Build input for OpenResponses API
+      const contentParts: any[] = [
+        { type: 'input_text', text: messageText }
       ];
       
-      // If we have a screenshot, add as input_image (base64)
+      // If we have a screenshot, add as input_image content part
       if (screenshotFile) {
         const base64 = screenshotFile.buffer.toString('base64');
-        input.push({
+        contentParts.push({
           type: 'input_image',
           source: { type: 'base64', media_type: 'image/png', data: base64 }
         });
@@ -398,6 +398,10 @@ app.post('/api/voice', upload.fields([{ name: 'audio', maxCount: 1 }, { name: 's
         screenshotStore.set(screenshotId, { buffer: screenshotFile.buffer, created: Date.now() });
         console.log(`[voice] Screenshot attached (${Math.round(base64.length / 1024)}KB base64)`);
       }
+      
+      const input = [
+        { type: 'message', role: 'user', content: contentParts }
+      ];
 
       console.log(`[voice] Sending to gateway via /v1/responses (${input.length} input items)`);
       const gatewayRes = await fetch(`${OPENCLAW_GATEWAY_URL}/v1/responses`, {
