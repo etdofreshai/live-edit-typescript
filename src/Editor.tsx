@@ -561,7 +561,7 @@ export default function Editor({ initialOwner, initialRepo, initialBranch, initi
                 {previewPort ? `:${previewPort}` : activeEntry.type === 'static' ? 'static' : ''}
               </span>
             </div>
-          ) : <span>Live Edit TypeScript</span>}
+          ) : <a href="/" style={{ color: 'inherit', textDecoration: 'none' }}>Live Edit TypeScript</a>}
           <div className="top-bar-controls">
             <button className="top-bar-btn" onClick={() => { if (activeEntry) { setSelectedRepo(activeEntry.repo); setShowEnvModal(true); } }} title="Environment variables">⚙️ Env</button>
             <button className="top-bar-btn" onClick={async () => {
