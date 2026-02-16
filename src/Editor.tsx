@@ -344,8 +344,10 @@ export default function Editor({ initialOwner, initialRepo, initialBranch, initi
 
   const refreshCache = () => api('/api/cache').then((newCache: CacheEntry[]) => {
     setCache(prev => {
-      const prevJson = JSON.stringify(prev);
-      const newJson = JSON.stringify(newCache);
+      // Compare ignoring volatile fields (lastAccessed changes on every request)
+      const strip = (entries: CacheEntry[]) => entries.map(({ lastAccessed, ...rest }) => rest);
+      const prevJson = JSON.stringify(strip(prev));
+      const newJson = JSON.stringify(strip(newCache));
       return prevJson === newJson ? prev : newCache;
     });
   });
