@@ -521,9 +521,8 @@ export default function Editor({ initialOwner, initialRepo, initialBranch, initi
 
     return () => {
       iframe.removeEventListener('load', onLoad);
-      setConsoleLogs([]);
     };
-  }, [previewPort, iframeRef.current]);
+  }, [previewPort]); // eslint-disable-line -- iframeRef is stable
 
   const remove = async (id: string) => {
     await api(`/api/cache/${id}`, { method: 'DELETE' });
