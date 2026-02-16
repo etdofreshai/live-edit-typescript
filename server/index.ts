@@ -380,18 +380,19 @@ app.post('/api/voice', upload.fields([{ name: 'audio', maxCount: 1 }, { name: 's
         messageText += `\n\n**Console logs (last ${consoleLogs.length} entries):**\n${consoleLogs.join('\n')}`;
       }
 
-      // If we have a screenshot, serve it via a temp URL and include in message
+      // If we have a screenshot, embed as base64 data URL in the message
       let messageContent: any;
       if (screenshotFile) {
+        const base64 = screenshotFile.buffer.toString('base64');
+        const dataUrl = `data:image/png;base64,${base64}`;
+        // Also save to screenshot store for the HTTP endpoint (browser access)
         const screenshotId = `ss-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
         screenshotStore.set(screenshotId, { buffer: screenshotFile.buffer, created: Date.now() });
-        
-        // Build a public URL to the screenshot
         const LIVEEDIT_URL = process.env.LIVEEDIT_URL || 'https://liveedittypescript.etdofresh.com';
         const screenshotUrl = `${LIVEEDIT_URL}/api/screenshots/${screenshotId}.png`;
         
-        messageContent = `[media attached: ${screenshotUrl} (image/png) | ${screenshotUrl}]\n${messageText}`;
-        console.log(`[voice] Screenshot available at ${screenshotUrl}`);
+        messageContent = `[media attached: ${dataUrl} (image/png)]\n${messageText}`;
+        console.log(`[voice] Screenshot embedded as data URL (${Math.round(base64.length / 1024)}KB base64), also at ${screenshotUrl}`);
       } else {
         messageContent = messageText;
       }
