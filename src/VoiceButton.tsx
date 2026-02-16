@@ -1,6 +1,37 @@
 import React, { useState, useRef, useEffect } from 'react';
-import html2canvas from 'html2canvas';
 import { soundStartRecord, soundStopRecord, soundTranscribed, soundSent, soundError } from './sounds';
+
+async function captureIframeScreenshot(iframe: HTMLIFrameElement): Promise<Blob | null> {
+  try {
+    const doc = iframe.contentDocument || iframe.contentWindow?.document;
+    if (!doc) return null;
+
+    // Try to find a <canvas> element first (games, WebGL apps)
+    const canvas = doc.querySelector('canvas');
+    if (canvas) {
+      const blob = await new Promise<Blob | null>((resolve) => {
+        (canvas as HTMLCanvasElement).toBlob((b) => resolve(b), 'image/png');
+      });
+      if (blob && blob.size > 0) return blob;
+    }
+
+    // Fallback: use html2canvas on the iframe's body
+    const { default: html2canvas } = await import('html2canvas');
+    const rendered = await html2canvas(doc.body, {
+      allowTaint: true,
+      useCORS: true,
+      backgroundColor: '#1a1a2e',
+      width: iframe.clientWidth,
+      height: iframe.clientHeight,
+    });
+    return await new Promise<Blob | null>((resolve) => {
+      rendered.toBlob((b) => resolve(b), 'image/png');
+    });
+  } catch (err) {
+    console.warn('Failed to capture screenshot:', err);
+    return null;
+  }
+}
 
 interface VoiceJob {
   id: string;
@@ -106,18 +137,7 @@ export function VoiceButton({ context, iframeRef, consoleLogs }: VoiceButtonProp
         // Capture screenshot if iframe is available
         let screenshotBlob: Blob | null = null;
         if (iframeRef?.current) {
-          try {
-            const canvas = await html2canvas(iframeRef.current, {
-              allowTaint: true,
-              useCORS: true,
-              backgroundColor: '#1a1a2e',
-            });
-            screenshotBlob = await new Promise<Blob>((resolve) => {
-              canvas.toBlob((blob) => resolve(blob!), 'image/png');
-            });
-          } catch (err) {
-            console.warn('Failed to capture screenshot:', err);
-          }
+          screenshotBlob = await captureIframeScreenshot(iframeRef.current);
         }
         
         // Send to server — job is created server-side
