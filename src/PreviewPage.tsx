@@ -212,67 +212,63 @@ export default function PreviewPage() {
         setLoading(true);
         setError('');
 
-        // Determine what to load
         let targetBranch = branch || 'main';
-        let targetCommit = commit;
+        const isLatest = !commit || commit === 'latest';
 
-        // If no commit specified, get the branch head
-        if (!targetCommit) {
-          const branches = await api(`/api/repos/${repo}/branches`);
-          const branchObj = branches.find((b: any) => b.name === targetBranch);
-          
-          if (!branchObj) {
-            // Try 'master' as fallback
-            const masterBranch = branches.find((b: any) => b.name === 'master');
-            if (masterBranch) {
-              targetBranch = 'master';
-              targetCommit = masterBranch.commit.sha;
-            } else if (branches.length > 0) {
-              // Use first branch as last resort
-              targetBranch = branches[0].name;
-              targetCommit = branches[0].commit.sha;
-            } else {
-              setError('No branches found in repository');
-              setLoading(false);
-              return;
-            }
-          } else {
-            targetCommit = branchObj.commit.sha;
+        if (isLatest) {
+          // Use run-latest for auto-refreshing tracking
+          const newEntry = await api('/api/run-latest', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              repo,
+              branch: targetBranch,
+              envVars: {},
+              startMode: 'vite',
+            }),
+          });
+
+          if (newEntry.error) {
+            setError(newEntry.error);
+            setLoading(false);
+            return;
           }
-        }
 
-        // Check if already running in cache
-        const cache = await api('/api/cache');
-        const existing = cache.find((e: CacheEntry) =>
-          e.repo === repo && e.sha === targetCommit
-        );
-
-        if (existing) {
-          setEntry(existing);
+          setEntry(newEntry);
           setLoading(false);
-          return;
-        }
+        } else {
+          // Specific commit
+          const cache = await api('/api/cache');
+          const existing = cache.find((e: CacheEntry) =>
+            e.repo === repo && e.sha === commit
+          );
 
-        // Start the server
-        const newEntry = await api('/api/run', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            repo,
-            sha: targetCommit,
-            envVars: {},
-            startMode: 'vite',
-          }),
-        });
+          if (existing) {
+            setEntry(existing);
+            setLoading(false);
+            return;
+          }
 
-        if (newEntry.error) {
-          setError(newEntry.error);
+          const newEntry = await api('/api/run', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              repo,
+              sha: commit,
+              envVars: {},
+              startMode: 'vite',
+            }),
+          });
+
+          if (newEntry.error) {
+            setError(newEntry.error);
+            setLoading(false);
+            return;
+          }
+
+          setEntry(newEntry);
           setLoading(false);
-          return;
         }
-
-        setEntry(newEntry);
-        setLoading(false);
       } catch (e: any) {
         setError(e.message);
         setLoading(false);
