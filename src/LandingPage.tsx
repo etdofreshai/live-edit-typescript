@@ -162,33 +162,63 @@ export default function LandingPage() {
                 <div style={{
                   marginTop: 12,
                   display: 'flex',
-                  gap: 12,
+                  gap: 10,
                   alignItems: 'center',
                 }}>
-                  <span style={{
-                    fontSize: 13,
-                    color: '#89b4fa',
-                    fontWeight: 500,
-                  }}>
-                    Open in Editor →
-                  </span>
+                  <Link
+                    to={`/etdofreshai/${repo.name}/`}
+                    onClick={e => e.stopPropagation()}
+                    style={{
+                      fontSize: 13,
+                      color: '#a6e3a1',
+                      fontWeight: 500,
+                      textDecoration: 'none',
+                      padding: '4px 12px',
+                      border: '1px solid #a6e3a144',
+                      borderRadius: 6,
+                      transition: 'all 0.15s ease',
+                    }}
+                    onMouseEnter={e => { e.currentTarget.style.background = '#a6e3a122'; }}
+                    onMouseLeave={e => { e.currentTarget.style.background = 'transparent'; }}
+                  >
+                    ▶ Run
+                  </Link>
+                  <Link
+                    to={`/edit/etdofreshai/${repo.name}`}
+                    onClick={e => e.stopPropagation()}
+                    style={{
+                      fontSize: 13,
+                      color: '#89b4fa',
+                      fontWeight: 500,
+                      textDecoration: 'none',
+                      padding: '4px 12px',
+                      border: '1px solid #89b4fa44',
+                      borderRadius: 6,
+                      transition: 'all 0.15s ease',
+                    }}
+                    onMouseEnter={e => { e.currentTarget.style.background = '#89b4fa22'; }}
+                    onMouseLeave={e => { e.currentTarget.style.background = 'transparent'; }}
+                  >
+                    ✏️ Edit
+                  </Link>
                   <a
                     href={repo.html_url}
                     target="_blank"
                     rel="noopener noreferrer"
                     onClick={e => e.stopPropagation()}
                     style={{
-                      fontSize: 12,
+                      fontSize: 13,
                       color: '#6b7280',
                       textDecoration: 'none',
-                      padding: '2px 8px',
+                      padding: '4px 12px',
                       border: '1px solid #3a3a5e',
-                      borderRadius: 4,
+                      borderRadius: 6,
+                      transition: 'all 0.15s ease',
                     }}
-                    onMouseEnter={e => e.currentTarget.style.color = '#cdd6f4'}
-                    onMouseLeave={e => e.currentTarget.style.color = '#6b7280'}
+                    onMouseEnter={e => { e.currentTarget.style.background = '#3a3a5e44'; e.currentTarget.style.color = '#cdd6f4'; }}
+                    onMouseLeave={e => { e.currentTarget.style.background = 'transparent'; e.currentTarget.style.color = '#6b7280'; }}
                   >
-                    View on GitHub ↗
+                    GitHub ↗
                   </a>
                 </div>
               </Link>
