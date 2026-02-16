@@ -301,6 +301,7 @@ app.post('/api/voice', upload.fields([{ name: 'audio', maxCount: 1 }, { name: 's
   const consoleLogs = req.body.consoleLogs ? JSON.parse(req.body.consoleLogs) : undefined;
   const audioFile = files.audio[0];
   const screenshotFile = files.screenshot?.[0];
+  console.log(`[voice] Received: audio=${audioFile.size}b, screenshot=${screenshotFile ? screenshotFile.size + 'b' : 'none'}, consoleLogs=${consoleLogs ? consoleLogs.length : 0}`);
   
   const jobId = `voice-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
   const job: VoiceJob = { id: jobId, status: 'transcribing', text: '', startedAt: Date.now() };
@@ -386,6 +387,7 @@ app.post('/api/voice', upload.fields([{ name: 'audio', maxCount: 1 }, { name: 's
         }
       }
 
+      console.log(`[voice] Sending to gateway: content type=${Array.isArray(messageContent) ? 'vision (' + messageContent.length + ' parts)' : 'text'}`);
       const gatewayRes = await fetch(`${OPENCLAW_GATEWAY_URL}/v1/chat/completions`, {
         method: 'POST',
         headers: {
