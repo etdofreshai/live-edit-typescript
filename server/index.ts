@@ -351,40 +351,35 @@ app.post('/api/voice', upload.fields([{ name: 'audio', maxCount: 1 }, { name: 's
         return;
       }
 
-      // Build message content
-      let messageContent: any = text;
-      
-      // If we have a screenshot, use the OpenAI vision message format
+      // Build message text
+      let messageText = text;
+      if (context?.repo) {
+        messageText = `[Live Edit: ${context.owner || 'etdofreshai'}/${context.repo}${context.branch ? ` @ ${context.branch}` : ''}${context.sha ? ` (${context.sha.slice(0, 7)})` : ''}]\n[If you make changes, commit and push to the repo.]\n\n${text}`;
+      }
+      if (consoleLogs && consoleLogs.length > 0) {
+        messageText += `\n\n**Console logs (last ${consoleLogs.length} entries):**\n${consoleLogs.join('\n')}`;
+      }
+
+      // If we have a screenshot, save it and reference it as media
+      let messageContent: any;
       if (screenshotFile) {
-        const screenshotBase64 = screenshotFile.buffer.toString('base64');
-        const screenshotDataUrl = `data:image/png;base64,${screenshotBase64}`;
-        
-        let textContent = text;
-        
-        // Add context prefix
-        if (context?.repo) {
-          textContent = `[Live Edit: ${context.owner || 'etdofreshai'}/${context.repo}${context.branch ? ` @ ${context.branch}` : ''}${context.sha ? ` (${context.sha.slice(0, 7)})` : ''}]\n[If you make changes, commit and push to the repo.]\n\n${text}`;
+        const mediaDir = '/data/.openclaw/media/inbound';
+        const filename = `liveedit-${Date.now()}.png`;
+        const filepath = pathModule.join(mediaDir, filename);
+        try {
+          fs.mkdirSync(mediaDir, { recursive: true });
+          fs.writeFileSync(filepath, screenshotFile.buffer);
+          messageContent = [
+            { type: 'text', text: `[media attached: ${filepath} (image/png) | ${filepath}]\n${messageText}` },
+            { type: 'image_url', image_url: { url: `data:image/png;base64,${screenshotFile.buffer.toString('base64')}` } }
+          ];
+          console.log(`[voice] Screenshot saved to ${filepath}`);
+        } catch (e) {
+          console.error('[voice] Failed to save screenshot:', e);
+          messageContent = messageText;
         }
-        
-        // Append console logs if available
-        if (consoleLogs && consoleLogs.length > 0) {
-          textContent += `\n\n**Console logs (last ${consoleLogs.length} entries):**\n${consoleLogs.join('\n')}`;
-        }
-        
-        messageContent = [
-          { type: 'text', text: textContent },
-          { type: 'image_url', image_url: { url: screenshotDataUrl } }
-        ];
       } else {
-        // Text-only message
-        if (context?.repo) {
-          messageContent = `[Live Edit: ${context.owner || 'etdofreshai'}/${context.repo}${context.branch ? ` @ ${context.branch}` : ''}${context.sha ? ` (${context.sha.slice(0, 7)})` : ''}]\n[If you make changes, commit and push to the repo.]\n\n${text}`;
-        }
-        
-        // Append console logs if available
-        if (consoleLogs && consoleLogs.length > 0) {
-          messageContent += `\n\n**Console logs (last ${consoleLogs.length} entries):**\n${consoleLogs.join('\n')}`;
-        }
+        messageContent = messageText;
       }
 
       console.log(`[voice] Sending to gateway: content type=${Array.isArray(messageContent) ? 'vision (' + messageContent.length + ' parts)' : 'text'}`);
