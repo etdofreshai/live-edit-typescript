@@ -113,7 +113,7 @@ export default function Editor({ initialOwner, initialRepo, initialBranch, initi
       if (selectedBranch) {
         path += `/${selectedBranch}`;
         if (activeEntry?.sha && activeEntry.repo === selectedRepo) {
-          path += `/${(activeEntry.isLatest && urlUsedLatest) ? 'latest' : activeEntry.sha}`;
+          path += `/${urlUsedLatest ? 'latest' : activeEntry.sha}`;
         }
       }
     }
