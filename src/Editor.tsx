@@ -112,7 +112,7 @@ export default function Editor({ initialOwner, initialRepo, initialBranch, initi
       path += `/etdofreshai/${selectedRepo}`;
       if (selectedBranch) {
         path += `/${selectedBranch}`;
-        if (activeEntry?.sha && activeEntry.repo === selectedRepo && activeEntry.branch === selectedBranch) {
+        if (activeEntry?.sha && activeEntry.repo === selectedRepo) {
           path += `/${(activeEntry.isLatest && urlUsedLatest) ? 'latest' : activeEntry.sha}`;
         }
       }
