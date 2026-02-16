@@ -319,6 +319,72 @@ app.post('/api/voice/send', async (req, res) => {
   }
 });
 
+// SHA endpoint for live-reload polling
+app.get('/api/cache/:id/sha', (req, res) => {
+  const entries = listEntries();
+  const entry = entries.find((e: any) => e.id === req.params.id);
+  if (!entry) return res.status(404).json({ error: 'not found' });
+  res.json({ sha: entry.sha });
+});
+
+// Inject live-reload script into proxied HTML responses
+proxy.on('proxyRes', (proxyRes, req, res) => {
+  // For non-selfHandleResponse requests, this is just informational — skip
+  if (!(req as any).__selfHandle) return;
+
+  const ct = proxyRes.headers['content-type'] || '';
+  const isHtml = ct.includes('text/html');
+
+  // Extract port and find cache entry
+  const portMatch = (req as any).originalUrl?.match(/^\/proxy\/(\d+)/);
+  const port = portMatch ? parseInt(portMatch[1]) : 0;
+  const entry = port ? getEntryByPort(port) : null;
+
+  if (!isHtml || !entry) {
+    // Pass through non-HTML responses unchanged
+    (res as http.ServerResponse).writeHead(proxyRes.statusCode || 200, proxyRes.headers);
+    proxyRes.pipe(res as any);
+    return;
+  }
+
+  // Buffer HTML response, inject reload script
+  const chunks: Buffer[] = [];
+  delete proxyRes.headers['content-length'];
+  (res as http.ServerResponse).writeHead(proxyRes.statusCode || 200, proxyRes.headers);
+
+  proxyRes.on('data', (chunk: Buffer) => chunks.push(chunk));
+  proxyRes.on('end', () => {
+    let html = Buffer.concat(chunks).toString('utf-8');
+    const reloadScript = `
+<script>
+(function() {
+  var cacheId = ${JSON.stringify(entry.id)};
+  var lastSha = ${JSON.stringify(entry.sha)};
+  setInterval(function() {
+    fetch('/api/cache/' + cacheId + '/sha')
+      .then(function(r) { return r.json(); })
+      .then(function(d) {
+        if (d.sha && d.sha !== lastSha) {
+          console.log('[live-reload] SHA changed:', lastSha.slice(0,7), '->', d.sha.slice(0,7));
+          lastSha = d.sha;
+          setTimeout(function() { location.reload(); }, 1000);
+        }
+      })
+      .catch(function() {});
+  }, 3000);
+})();
+</script>`;
+    if (html.includes('</body>')) {
+      html = html.replace('</body>', reloadScript + '</body>');
+    } else if (html.includes('</html>')) {
+      html = html.replace('</html>', reloadScript + '</html>');
+    } else {
+      html += reloadScript;
+    }
+    (res as http.ServerResponse).end(html);
+  });
+});
+
 // Proxy /proxy/:port/* → target Vite dev server
 // Target Vite runs with --base /proxy/{port}/ so it expects the full prefixed path
 // Do NOT strip the prefix — forward as-is
@@ -329,7 +395,8 @@ app.use('/proxy/:port', (req, res) => {
   }
   // Reconstruct the full URL with the /proxy/{port} prefix
   req.url = `/proxy/${port}${req.url || '/'}`;
-  proxy.web(req, res, { target: `http://localhost:${port}` });
+  (req as any).__selfHandle = true;
+  proxy.web(req, res, { target: `http://localhost:${port}`, selfHandleResponse: true });
 });
 
 const server = http.createServer(app);
@@ -364,5 +431,5 @@ server.listen(3000, () => {
         console.error(`[latest] poll error for ${entry.repo}/${entry.branch}:`, e.message);
       }
     }
-  }, 30_000);
+  }, 10_000);
 });
