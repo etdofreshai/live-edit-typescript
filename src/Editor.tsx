@@ -163,17 +163,19 @@ interface EditorProps {
 
 export default function Editor({ initialOwner, initialRepo, initialBranch, initialCommit, onNavigate }: EditorProps = {}) {
   const saved = useRef(loadPersistedState());
+  // If URL params are provided, don't restore preview state from localStorage
+  const hasUrlParams = !!(initialRepo);
   const [repos, setRepos] = useState<any[]>([]);
   const [selectedRepo, setSelectedRepo] = useState(initialRepo || saved.current.selectedRepo || '');
   const [branches, setBranches] = useState<any[]>([]);
   const [selectedBranch, setSelectedBranch] = useState(initialBranch || saved.current.selectedBranch || '');
   const [commits, setCommits] = useState<any[]>([]);
   const [cache, setCache] = useState<CacheEntry[]>([]);
-  const [previewPort, setPreviewPort] = useState<number | null>(saved.current.previewPort ?? null);
+  const [previewPort, setPreviewPort] = useState<number | null>(hasUrlParams ? null : (saved.current.previewPort ?? null));
   const [loading, setLoading] = useState('');
   const [error, setError] = useState('');
   const [sidebarOpen, setSidebarOpen] = useState(saved.current.sidebarOpen ?? true);
-  const [activeEntryId, setActiveEntryId] = useState<string | null>(saved.current.activeEntryId ?? null);
+  const [activeEntryId, setActiveEntryId] = useState<string | null>(hasUrlParams ? null : (saved.current.activeEntryId ?? null));
   const [files, setFiles] = useState<string[]>([]);
   const [currentFile, setCurrentFile] = useState<{ path: string; content?: string; binary?: boolean } | null>(null);
   const [expandedDirs, setExpandedDirs] = useState<Set<string>>(new Set());
@@ -391,7 +393,8 @@ export default function Editor({ initialOwner, initialRepo, initialBranch, initi
         }
 
         // Validate active entry still exists in cache — if not, auto-re-run
-        if (s.activeEntryId) {
+        // Skip restore when URL params are provided (URL is source of truth)
+        if (s.activeEntryId && !hasUrlParams) {
           const entryExists = cacheList.some((e: CacheEntry) => e.id === s.activeEntryId);
           if (!entryExists && s.lastRun) {
             // Server restarted — re-run the last entry
