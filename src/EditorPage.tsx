@@ -1,4 +1,4 @@
-import React, { useEffect } from 'react';
+import React, { useCallback, useRef, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import Editor from './Editor';
 
@@ -11,15 +11,23 @@ export default function EditorPage() {
   }>();
   
   const navigate = useNavigate();
+  const navigateRef = useRef(navigate);
+  navigateRef.current = navigate;
+  
+  const stableNavigate = useCallback((path: string) => {
+    navigateRef.current(path, { replace: true });
+  }, []);
 
-  // Pass URL params and navigation handler to Editor
+  // Only pass initial params on first mount, not on every URL change
+  const initialParams = useRef({ owner, repo, branch, commit });
+
   return (
     <Editor
-      initialOwner={owner}
-      initialRepo={repo}
-      initialBranch={branch}
-      initialCommit={commit}
-      onNavigate={(path: string) => navigate(path)}
+      initialOwner={initialParams.current.owner}
+      initialRepo={initialParams.current.repo}
+      initialBranch={initialParams.current.branch}
+      initialCommit={initialParams.current.commit}
+      onNavigate={stableNavigate}
     />
   );
 }

@@ -195,8 +195,11 @@ export default function Editor({ initialOwner, initialRepo, initialBranch, initi
   const activeEntry = cache.find(e => e.id === activeEntryId) || (previewPort ? cache.find(e => e.port === previewPort) : null);
 
   // Sync URL when selection changes
+  const onNavigateRef = React.useRef(onNavigate);
+  onNavigateRef.current = onNavigate;
+  
   useEffect(() => {
-    if (!onNavigate || restoringState) return;
+    if (!onNavigateRef.current || restoringState) return;
     
     let path = '/edit';
     if (selectedRepo) {
@@ -211,15 +214,12 @@ export default function Editor({ initialOwner, initialRepo, initialBranch, initi
     
     // Only navigate if the path actually changed
     const currentPath = window.location.pathname;
-    if (currentPath !== path && !currentPath.startsWith('/edit/')) {
-      // Don't update if we're on a different route entirely
-      return;
-    }
+    if (!currentPath.startsWith('/edit')) return;
     
     if (currentPath !== path) {
-      onNavigate(path);
+      onNavigateRef.current(path);
     }
-  }, [selectedRepo, selectedBranch, activeEntry?.sha, onNavigate, restoringState]);
+  }, [selectedRepo, selectedBranch, activeEntry?.sha, restoringState]);
 
   // Handle initial commit from URL
   useEffect(() => {
@@ -419,7 +419,13 @@ export default function Editor({ initialOwner, initialRepo, initialBranch, initi
     init();
   }, []);
 
-  const refreshCache = () => api('/api/cache').then(setCache);
+  const refreshCache = () => api('/api/cache').then((newCache: CacheEntry[]) => {
+    setCache(prev => {
+      const prevJson = JSON.stringify(prev);
+      const newJson = JSON.stringify(newCache);
+      return prevJson === newJson ? prev : newCache;
+    });
+  });
 
   const selectRepo = async (name: string) => {
     setSelectedRepo(name); setSelectedBranch(''); setCommits([]);
