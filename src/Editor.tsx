@@ -226,26 +226,42 @@ export default function Editor({ initialOwner, initialRepo, initialBranch, initi
     if (!initialCommit || !initialRepo || !initialBranch || restoringState) return;
     
     const runInitialCommit = async () => {
-      // Check if already running
-      if (activeEntry?.sha === initialCommit) return;
-      
       // Wait for initial load to complete
       if (repos.length === 0) return;
       
       try {
-        setLoading(initialCommit);
         setSidebarOpen(false);
         
-        const entry = await api('/api/run', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ 
-            repo: initialRepo, 
-            sha: initialCommit,
-            envVars: parseEnvText(envText),
-            startMode,
-          }),
-        });
+        let entry;
+        if (initialCommit === 'latest') {
+          // Run latest commit on this branch (same as clicking "▶ Latest")
+          if (activeEntry?.isLatest && activeEntry.repo === initialRepo && activeEntry.branch === initialBranch) return;
+          setLoading('latest');
+          entry = await api('/api/run-latest', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              repo: initialRepo,
+              branch: initialBranch,
+              envVars: parseEnvText(envText),
+              startMode,
+            }),
+          });
+        } else {
+          // Run specific commit
+          if (activeEntry?.sha === initialCommit) return;
+          setLoading(initialCommit);
+          entry = await api('/api/run', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ 
+              repo: initialRepo, 
+              sha: initialCommit,
+              envVars: parseEnvText(envText),
+              startMode,
+            }),
+          });
+        }
         
         if (entry.error) {
           setError(entry.error);

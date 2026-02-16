@@ -184,7 +184,7 @@ export default function LandingPage() {
                     ▶ Run
                   </Link>
                   <Link
-                    to={`/edit/etdofreshai/${repo.name}`}
+                    to={`/edit/etdofreshai/${repo.name}/main/latest`}
                     onClick={e => e.stopPropagation()}
                     style={{
                       fontSize: 13,
