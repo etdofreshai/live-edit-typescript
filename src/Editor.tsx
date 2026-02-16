@@ -584,7 +584,7 @@ export default function Editor({ initialOwner, initialRepo, initialBranch, initi
 
       <div className="main-content">
       <div className={`sidebar ${sidebarOpen ? '' : 'collapsed'}`}>
-        <h2>Live Edit TypeScript</h2>
+        <h2><a href="/" style={{ color: 'inherit', textDecoration: 'none' }}>Live Edit TypeScript</a></h2>
         {error && <div className="error-banner">{error}</div>}
 
         <h3>Repos</h3>
