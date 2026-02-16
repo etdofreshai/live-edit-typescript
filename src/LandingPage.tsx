@@ -30,12 +30,22 @@ function timeAgo(dateStr: string): string {
   return `${Math.floor(months / 12)}y ago`;
 }
 
+interface GitInfo {
+  owner: string;
+  repo: string;
+  branch: string;
+  sha: string;
+  date: string;
+}
+
 export default function LandingPage() {
   const [repos, setRepos] = useState<Repo[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
+  const [gitInfo, setGitInfo] = useState<GitInfo | null>(null);
 
   useEffect(() => {
+    api('/api/info').then(setGitInfo).catch(() => {});
     api('/api/repos')
       .then(repoList => {
         // Sort by updated_at descending
@@ -241,6 +251,35 @@ export default function LandingPage() {
           </div>
         )}
       </div>
+
+      {gitInfo && (
+        <div style={{
+          marginTop: 60,
+          padding: '16px 20px',
+          fontSize: 12,
+          color: '#4a4a6a',
+          textAlign: 'center',
+          fontFamily: 'monospace',
+          lineHeight: 1.8,
+        }}>
+          <span>{gitInfo.owner}/{gitInfo.repo}</span>
+          {' · '}
+          <span>{gitInfo.branch}</span>
+          {' · '}
+          <a
+            href={`https://github.com/${gitInfo.owner}/${gitInfo.repo}/commit/${gitInfo.sha}`}
+            target="_blank"
+            rel="noopener noreferrer"
+            style={{ color: '#4a4a6a', textDecoration: 'none' }}
+            onMouseEnter={e => e.currentTarget.style.color = '#89b4fa'}
+            onMouseLeave={e => e.currentTarget.style.color = '#4a4a6a'}
+          >
+            {gitInfo.sha.slice(0, 7)}
+          </a>
+          {' · '}
+          <span>{new Date(gitInfo.date).toLocaleString()}</span>
+        </div>
+      )}
     </div>
   );
 }

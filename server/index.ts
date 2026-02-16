@@ -11,8 +11,21 @@ import { getEntry, addEntry, evictIfNeeded, allocatePort, removeEntry, listEntri
 import { cloneAndStart, getTargetDir, pullLatest, getServerLog } from './runner.js';
 import { webhookRouter, registerWebhook, unregisterWebhook } from './webhook.js';
 
+import { execSync } from 'child_process';
+
 const app = express();
 app.use(cors());
+
+// Git info for footer
+const gitInfo = (() => {
+  try {
+    const sha = execSync('git rev-parse HEAD', { encoding: 'utf8' }).trim();
+    const branch = execSync('git rev-parse --abbrev-ref HEAD', { encoding: 'utf8' }).trim();
+    const date = execSync('git log -1 --format=%aI', { encoding: 'utf8' }).trim();
+    return { owner: OWNER, repo: 'live-edit-typescript', branch, sha, date };
+  } catch { return null; }
+})();
+app.get('/api/info', (_req, res) => res.json(gitInfo));
 // Webhook route MUST come before express.json() — it needs raw body
 app.use(webhookRouter);
 app.use(express.json());
