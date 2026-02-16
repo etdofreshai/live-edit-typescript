@@ -304,6 +304,7 @@ body {
 
 .voice-check { color: var(--accent-green); font-weight: 700; font-size: 15px; }
 .voice-error-icon { color: var(--danger); font-weight: 700; font-size: 15px; }
+.voice-msg-timer { flex-shrink: 0; font-size: 11px; color: var(--text-muted); font-family: 'SF Mono', 'Cascadia Code', monospace; margin-left: auto; padding-left: 8px; }
 
 @keyframes voiceFadeOut {
   0% { opacity: 1; transform: translateY(0); }
