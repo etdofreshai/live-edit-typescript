@@ -268,26 +268,6 @@ interface VoiceJob {
 
 const voiceJobs: Map<string, VoiceJob> = new Map();
 
-// Screenshot store for serving to OpenClaw
-const screenshotStore: Map<string, { buffer: Buffer; created: number }> = new Map();
-
-// Clean up old screenshots after 30 min
-setInterval(() => {
-  const cutoff = Date.now() - 30 * 60 * 1000;
-  for (const [id, ss] of screenshotStore) {
-    if (ss.created < cutoff) screenshotStore.delete(id);
-  }
-}, 60_000);
-
-// Serve screenshots
-app.get('/api/screenshots/:id.png', (req, res) => {
-  const ss = screenshotStore.get(req.params.id);
-  if (!ss) return res.status(404).send('Not found');
-  res.setHeader('Content-Type', 'image/png');
-  res.setHeader('Cache-Control', 'public, max-age=300');
-  res.send(ss.buffer);
-});
-
 // Clean up old completed jobs after 30s
 setInterval(() => {
   const now = Date.now();
@@ -392,10 +372,6 @@ app.post('/api/voice', upload.fields([{ name: 'audio', maxCount: 1 }, { name: 's
           type: 'input_image',
           source: { type: 'base64', media_type: 'image/png', data: base64 }
         });
-        
-        // Also save to screenshot store for browser access
-        const screenshotId = `ss-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
-        screenshotStore.set(screenshotId, { buffer: screenshotFile.buffer, created: Date.now() });
         console.log(`[voice] Screenshot attached (${Math.round(base64.length / 1024)}KB base64)`);
       }
       
