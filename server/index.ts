@@ -380,25 +380,27 @@ app.post('/api/voice', upload.fields([{ name: 'audio', maxCount: 1 }, { name: 's
         messageText += `\n\n**Console logs (last ${consoleLogs.length} entries):**\n${consoleLogs.join('\n')}`;
       }
 
-      // If we have a screenshot, embed as base64 data URL in the message
-      let messageContent: any;
+      // Build input items for OpenResponses API
+      const input: any[] = [
+        { type: 'message', role: 'user', content: messageText }
+      ];
+      
+      // If we have a screenshot, add as input_image (base64)
       if (screenshotFile) {
         const base64 = screenshotFile.buffer.toString('base64');
-        const dataUrl = `data:image/png;base64,${base64}`;
-        // Also save to screenshot store for the HTTP endpoint (browser access)
+        input.push({
+          type: 'input_image',
+          source: { type: 'base64', media_type: 'image/png', data: base64 }
+        });
+        
+        // Also save to screenshot store for browser access
         const screenshotId = `ss-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
         screenshotStore.set(screenshotId, { buffer: screenshotFile.buffer, created: Date.now() });
-        const LIVEEDIT_URL = process.env.LIVEEDIT_URL || 'https://liveedittypescript.etdofresh.com';
-        const screenshotUrl = `${LIVEEDIT_URL}/api/screenshots/${screenshotId}.png`;
-        
-        messageContent = `[media attached: ${dataUrl} (image/png)]\n${messageText}`;
-        console.log(`[voice] Screenshot embedded as data URL (${Math.round(base64.length / 1024)}KB base64), also at ${screenshotUrl}`);
-      } else {
-        messageContent = messageText;
+        console.log(`[voice] Screenshot attached (${Math.round(base64.length / 1024)}KB base64)`);
       }
 
-      console.log(`[voice] Sending to gateway: content type=${Array.isArray(messageContent) ? 'vision (' + messageContent.length + ' parts)' : 'text'}`);
-      const gatewayRes = await fetch(`${OPENCLAW_GATEWAY_URL}/v1/chat/completions`, {
+      console.log(`[voice] Sending to gateway via /v1/responses (${input.length} input items)`);
+      const gatewayRes = await fetch(`${OPENCLAW_GATEWAY_URL}/v1/responses`, {
         method: 'POST',
         headers: {
           'Authorization': `Bearer ${OPENCLAW_GATEWAY_TOKEN}`,
@@ -406,7 +408,7 @@ app.post('/api/voice', upload.fields([{ name: 'audio', maxCount: 1 }, { name: 's
         },
         body: JSON.stringify({
           model: 'openclaw:main',
-          messages: [{ role: 'user', content: messageContent }],
+          input,
         }),
       });
 
