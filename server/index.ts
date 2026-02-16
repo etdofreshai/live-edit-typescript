@@ -443,6 +443,24 @@ app.use('/proxy/:port', (req, res) => {
   proxy.web(req, res, { target: `http://localhost:${port}`, selfHandleResponse: true });
 });
 
+// SPA fallback - serve index.html for all other routes (must be last)
+// This allows React Router to handle client-side routing
+app.get('*', (req, res) => {
+  // Don't serve index.html for API routes (they should have been handled above)
+  if (req.path.startsWith('/api/') || req.path.startsWith('/proxy/')) {
+    return res.status(404).json({ error: 'Not found' });
+  }
+  
+  // In production, serve built index.html
+  // In development, let Vite handle it (this won't be hit in dev mode)
+  res.sendFile(pathModule.join(process.cwd(), 'dist', 'index.html'), (err) => {
+    if (err) {
+      // If dist doesn't exist, we're in dev mode - Vite handles this
+      res.status(404).send('Not found - run in dev mode with Vite');
+    }
+  });
+});
+
 const server = http.createServer(app);
 
 // WebSocket upgrade for HMR — also keep prefix intact
