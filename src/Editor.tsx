@@ -81,6 +81,7 @@ export default function Editor({ initialOwner, initialRepo, initialBranch, initi
   const [currentFile, setCurrentFile] = useState<{ path: string; content?: string; binary?: boolean } | null>(null);
   const [expandedDirs, setExpandedDirs] = useState<Set<string>>(new Set());
   const [restoringState, setRestoringState] = useState(true);
+  const [urlUsedLatest, setUrlUsedLatest] = useState(initialCommit === 'latest');
   const [branchFrom, setBranchFrom] = useState<string | null>(null);
   const [newBranchName, setNewBranchName] = useState('');
   const [branchError, setBranchError] = useState('');
@@ -112,7 +113,7 @@ export default function Editor({ initialOwner, initialRepo, initialBranch, initi
       if (selectedBranch) {
         path += `/${selectedBranch}`;
         if (activeEntry?.sha && activeEntry.repo === selectedRepo && activeEntry.branch === selectedBranch) {
-          path += `/${activeEntry.isLatest ? 'latest' : activeEntry.sha}`;
+          path += `/${(activeEntry.isLatest && urlUsedLatest) ? 'latest' : activeEntry.sha}`;
         }
       }
     }
@@ -429,7 +430,7 @@ export default function Editor({ initialOwner, initialRepo, initialBranch, initi
   };
 
   const run = async (sha: string) => {
-    setLoading(sha); setError(''); setSidebarOpen(false);
+    setLoading(sha); setError(''); setSidebarOpen(false); setUrlUsedLatest(false);
     try {
       const entry = await api('/api/run', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
@@ -443,7 +444,7 @@ export default function Editor({ initialOwner, initialRepo, initialBranch, initi
   };
 
   const runLatest = async () => {
-    setLoading('latest'); setError(''); setSidebarOpen(false);
+    setLoading('latest'); setError(''); setSidebarOpen(false); setUrlUsedLatest(true);
     try {
       const entry = await api('/api/run-latest', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
