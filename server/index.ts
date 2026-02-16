@@ -268,6 +268,26 @@ interface VoiceJob {
 
 const voiceJobs: Map<string, VoiceJob> = new Map();
 
+// Screenshot store for serving to OpenClaw
+const screenshotStore: Map<string, { buffer: Buffer; created: number }> = new Map();
+
+// Clean up old screenshots after 5 min
+setInterval(() => {
+  const cutoff = Date.now() - 5 * 60 * 1000;
+  for (const [id, ss] of screenshotStore) {
+    if (ss.created < cutoff) screenshotStore.delete(id);
+  }
+}, 60_000);
+
+// Serve screenshots
+app.get('/api/screenshots/:id.png', (req, res) => {
+  const ss = screenshotStore.get(req.params.id);
+  if (!ss) return res.status(404).send('Not found');
+  res.setHeader('Content-Type', 'image/png');
+  res.setHeader('Cache-Control', 'public, max-age=300');
+  res.send(ss.buffer);
+});
+
 // Clean up old completed jobs after 30s
 setInterval(() => {
   const now = Date.now();
@@ -360,24 +380,18 @@ app.post('/api/voice', upload.fields([{ name: 'audio', maxCount: 1 }, { name: 's
         messageText += `\n\n**Console logs (last ${consoleLogs.length} entries):**\n${consoleLogs.join('\n')}`;
       }
 
-      // If we have a screenshot, save it and reference it as media
+      // If we have a screenshot, serve it via a temp URL and include in message
       let messageContent: any;
       if (screenshotFile) {
-        const mediaDir = '/data/.openclaw/media/inbound';
-        const filename = `liveedit-${Date.now()}.png`;
-        const filepath = pathModule.join(mediaDir, filename);
-        try {
-          fs.mkdirSync(mediaDir, { recursive: true });
-          fs.writeFileSync(filepath, screenshotFile.buffer);
-          messageContent = [
-            { type: 'text', text: `[media attached: ${filepath} (image/png) | ${filepath}]\n${messageText}` },
-            { type: 'image_url', image_url: { url: `data:image/png;base64,${screenshotFile.buffer.toString('base64')}` } }
-          ];
-          console.log(`[voice] Screenshot saved to ${filepath}`);
-        } catch (e) {
-          console.error('[voice] Failed to save screenshot:', e);
-          messageContent = messageText;
-        }
+        const screenshotId = `ss-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
+        screenshotStore.set(screenshotId, { buffer: screenshotFile.buffer, created: Date.now() });
+        
+        // Build a public URL to the screenshot
+        const LIVEEDIT_URL = process.env.LIVEEDIT_URL || 'https://liveedittypescript.etdofresh.com';
+        const screenshotUrl = `${LIVEEDIT_URL}/api/screenshots/${screenshotId}.png`;
+        
+        messageContent = `[media attached: ${screenshotUrl} (image/png) | ${screenshotUrl}]\n${messageText}`;
+        console.log(`[voice] Screenshot available at ${screenshotUrl}`);
       } else {
         messageContent = messageText;
       }
