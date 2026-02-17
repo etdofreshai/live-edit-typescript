@@ -268,6 +268,29 @@ interface VoiceJob {
 
 const voiceJobs: Map<string, VoiceJob> = new Map();
 
+// ─── Transcript History ───
+interface TranscriptEntry {
+  id: string;
+  timestamp: number;
+  userText: string;
+  screenshot?: boolean;
+  consoleLogs?: number;
+  response?: string;
+  status: 'pending' | 'complete' | 'error';
+}
+
+const transcriptHistory: TranscriptEntry[] = [];
+
+function addToHistory(entry: TranscriptEntry) {
+  transcriptHistory.push(entry);
+  // Cap at 100 entries (drop oldest)
+  while (transcriptHistory.length > 100) transcriptHistory.shift();
+}
+
+app.get('/api/transcript-history', (_req, res) => {
+  res.json(transcriptHistory.slice(-50));
+});
+
 // Clean up old completed jobs after 30s
 setInterval(() => {
   const now = Date.now();
@@ -343,6 +366,18 @@ app.post('/api/voice', upload.fields([{ name: 'audio', maxCount: 1 }, { name: 's
       job.text = `"${text}"`;
       job.status = 'sending';
 
+      // Create transcript history entry
+      const transcriptId = `tr-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
+      const transcriptEntry: TranscriptEntry = {
+        id: transcriptId,
+        timestamp: Date.now(),
+        userText: text,
+        screenshot: !!screenshotFile,
+        consoleLogs: consoleLogs?.length || undefined,
+        status: 'pending',
+      };
+      addToHistory(transcriptEntry);
+
       // Step 2: Send to OpenClaw
       const OPENCLAW_GATEWAY_URL = process.env.OPENCLAW_GATEWAY_URL;
       const OPENCLAW_GATEWAY_TOKEN = process.env.OPENCLAW_GATEWAY_TOKEN;
@@ -392,11 +427,41 @@ app.post('/api/voice', upload.fields([{ name: 'audio', maxCount: 1 }, { name: 's
         }),
       });
 
+      // Parse response body (for transcript history) before checking status
+      let responseBody: any = null;
+      try { responseBody = await gatewayRes.json(); } catch {}
+
       if (!gatewayRes.ok) {
-        const err = await gatewayRes.text();
-        console.error('OpenClaw gateway error:', err);
+        console.error('OpenClaw gateway error:', responseBody);
         job.status = 'error'; job.error = 'Gateway send failed';
+        // Mark transcript as error
+        const histEntry = transcriptHistory.find(e => e.id === transcriptId);
+        if (histEntry) histEntry.status = 'error';
         return;
+      }
+
+      // Extract assistant response text from OpenAI Responses API format
+      let responseText: string | undefined;
+      try {
+        const outputItems: any[] = responseBody?.output || [];
+        for (const item of outputItems) {
+          if (item?.type === 'message' && item?.role === 'assistant') {
+            const contentParts: any[] = Array.isArray(item.content) ? item.content : [];
+            const textPart = contentParts.find((c: any) => c.type === 'output_text' || c.type === 'text');
+            if (textPart?.text) { responseText = textPart.text; break; }
+          }
+        }
+        // Fallback: chat-completions style
+        if (!responseText) {
+          responseText = responseBody?.choices?.[0]?.message?.content || undefined;
+        }
+      } catch {}
+
+      // Update transcript entry
+      const histEntry = transcriptHistory.find(e => e.id === transcriptId);
+      if (histEntry) {
+        histEntry.status = 'complete';
+        if (responseText) histEntry.response = responseText;
       }
 
       console.log('[voice] Sent to OpenClaw:', text.slice(0, 50));
@@ -404,6 +469,9 @@ app.post('/api/voice', upload.fields([{ name: 'audio', maxCount: 1 }, { name: 's
     } catch (e: any) {
       console.error('[voice] Error:', e);
       job.status = 'error'; job.error = e.message;
+      // Also mark transcript entry as error if it exists
+      const histEntry = transcriptHistory.find(e => e.status === 'pending');
+      if (histEntry) histEntry.status = 'error';
     }
   })();
 });

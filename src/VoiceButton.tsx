@@ -1,4 +1,4 @@
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { soundStartRecord, soundStopRecord, soundTranscribed, soundSent, soundError } from './sounds';
 
 async function captureIframeScreenshot(iframe: HTMLIFrameElement): Promise<Blob | null> {
@@ -74,10 +74,50 @@ interface VoiceButtonProps {
 export function VoiceButton({ context, iframeRef, consoleLogs }: VoiceButtonProps) {
   const [recording, setRecording] = useState(false);
   const [jobs, setJobs] = useState<VoiceJob[]>([]);
+  const [minimized, setMinimized] = useState(false);
+  const [faded, setFaded] = useState(false);
+
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const chunksRef = useRef<Blob[]>([]);
   const prevStatusRef = useRef<Map<string, string>>(new Map());
   const screenshotUrls = useRef<Map<string, string>>(new Map());
+  const fadeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const touchStartXRef = useRef<number>(0);
+  const hoveringRef = useRef(false);
+
+  const scheduleFade = useCallback(() => {
+    if (fadeTimerRef.current) clearTimeout(fadeTimerRef.current);
+    fadeTimerRef.current = setTimeout(() => {
+      if (!hoveringRef.current) setFaded(true);
+    }, 5000);
+  }, []);
+
+  const resetFade = useCallback(() => {
+    setFaded(false);
+    scheduleFade();
+  }, [scheduleFade]);
+
+  // Detect job state changes (new jobs, status transitions)
+  const jobStateStr = jobs.map(j => `${j.id}:${j.status}`).join(',');
+  const prevJobStateRef = useRef('');
+
+  useEffect(() => {
+    if (jobStateStr === prevJobStateRef.current) return;
+    prevJobStateRef.current = jobStateStr;
+    if (jobs.length > 0) {
+      resetFade();
+    } else {
+      if (fadeTimerRef.current) clearTimeout(fadeTimerRef.current);
+      setFaded(false);
+    }
+  }); // run every render, but short-circuit with ref check
+
+  // Cleanup fade timer on unmount
+  useEffect(() => {
+    return () => {
+      if (fadeTimerRef.current) clearTimeout(fadeTimerRef.current);
+    };
+  }, []);
 
   // Poll server for job status
   useEffect(() => {
@@ -86,7 +126,7 @@ export function VoiceButton({ context, iframeRef, consoleLogs }: VoiceButtonProp
         const res = await fetch(`${import.meta.env.BASE_URL}api/voice/jobs`);
         if (res.ok) {
           const serverJobs: VoiceJob[] = await res.json();
-          
+
           // Play sounds on status transitions
           for (const job of serverJobs) {
             const prev = prevStatusRef.current.get(job.id);
@@ -97,7 +137,7 @@ export function VoiceButton({ context, iframeRef, consoleLogs }: VoiceButtonProp
             }
             prevStatusRef.current.set(job.id, job.status);
           }
-          
+
           // Clean up tracking for removed jobs
           const jobIds = new Set(serverJobs.map(j => j.id));
           for (const id of prevStatusRef.current.keys()) {
@@ -136,13 +176,13 @@ export function VoiceButton({ context, iframeRef, consoleLogs }: VoiceButtonProp
       mediaRecorder.onstop = async () => {
         stream.getTracks().forEach(t => t.stop());
         const audioBlob = new Blob(chunksRef.current, { type: 'audio/webm' });
-        
+
         // Capture screenshot if iframe is available
         let screenshotBlob: Blob | null = null;
         if (iframeRef?.current) {
           screenshotBlob = await captureIframeScreenshot(iframeRef.current);
         }
-        
+
         // Send to server — job is created server-side
         const formData = new FormData();
         formData.append('audio', audioBlob, 'recording.webm');
@@ -151,7 +191,7 @@ export function VoiceButton({ context, iframeRef, consoleLogs }: VoiceButtonProp
         if (consoleLogs && consoleLogs.length > 0) {
           formData.append('consoleLogs', JSON.stringify(consoleLogs));
         }
-        
+
         try {
           const res = await fetch(`${import.meta.env.BASE_URL}api/voice`, {
             method: 'POST', body: formData,
@@ -189,6 +229,29 @@ export function VoiceButton({ context, iframeRef, consoleLogs }: VoiceButtonProp
     else startRecording();
   };
 
+  // Swipe to minimize/expand
+  const handleTouchStart = (e: React.TouchEvent) => {
+    touchStartXRef.current = e.touches[0].clientX;
+  };
+
+  const handleTouchEnd = (e: React.TouchEvent) => {
+    const dx = e.changedTouches[0].clientX - touchStartXRef.current;
+    if (dx > 50) setMinimized(true);   // swipe right → minimize
+    else if (dx < -50) setMinimized(false); // swipe left → expand
+  };
+
+  // Hover handlers for fade
+  const handleMouseEnter = () => {
+    hoveringRef.current = true;
+    setFaded(false);
+    if (fadeTimerRef.current) clearTimeout(fadeTimerRef.current);
+  };
+
+  const handleMouseLeave = () => {
+    hoveringRef.current = false;
+    if (jobs.length > 0) scheduleFade();
+  };
+
   return (
     <>
       <button
@@ -205,32 +268,75 @@ export function VoiceButton({ context, iframeRef, consoleLogs }: VoiceButtonProp
       </button>
 
       {jobs.length > 0 && (
-        <div className="voice-queue">
-          {jobs.map(j => (
-            <div key={j.id} className={`voice-msg ${j.status}`}>
-              {screenshotUrls.current.has(j.id) && (
-                <img
-                  src={screenshotUrls.current.get(j.id)}
-                  alt="screenshot"
-                  style={{ width: 48, height: 36, objectFit: 'cover', borderRadius: 4, flexShrink: 0, border: '1px solid #3a3a5e' }}
-                />
-              )}
-              <span className="voice-msg-icon">
-                {(j.status === 'transcribing' || j.status === 'sending') && <span className="voice-spinner" />}
-                {j.status === 'sent' && <span className="voice-check">✓</span>}
-                {j.status === 'error' && <span className="voice-error-icon">✕</span>}
-              </span>
-              <span className="voice-msg-text">
-                {j.status === 'transcribing' ? 'Transcribing...' : j.text || j.error || ''}
-              </span>
-              {(j.status === 'transcribing' || j.status === 'sending') && (
-                <ElapsedTimer startedAt={j.startedAt} />
-              )}
-              {(j.status === 'sent' || j.status === 'error') && (
-                <button className="voice-msg-dismiss" onClick={() => dismissJob(j.id)} title="Dismiss">✕</button>
-              )}
+        <div
+          className={`voice-queue${minimized ? ' minimized' : ''}${faded ? ' faded' : ''}`}
+          onMouseEnter={handleMouseEnter}
+          onMouseLeave={handleMouseLeave}
+          onTouchStart={handleTouchStart}
+          onTouchEnd={handleTouchEnd}
+        >
+          {/* Queue header with minimize button */}
+          <div className="voice-queue-header">
+            <span className="voice-queue-title">
+              {minimized ? `${jobs.length} job${jobs.length !== 1 ? 's' : ''}` : 'Voice Queue'}
+            </span>
+            <button
+              className="voice-minimize-btn"
+              onClick={() => setMinimized(m => !m)}
+              title={minimized ? 'Expand (swipe left)' : 'Minimize (swipe right)'}
+            >
+              {minimized ? '▸' : '▾'}
+            </button>
+          </div>
+
+          {minimized ? (
+            /* Minimized: compact pill row with screenshot + icon per job */
+            <div className="voice-queue-pills">
+              {jobs.map(j => (
+                <div key={j.id} className="voice-pill">
+                  {screenshotUrls.current.has(j.id) && (
+                    <img
+                      src={screenshotUrls.current.get(j.id)}
+                      alt="screenshot"
+                      className="voice-pill-screenshot"
+                    />
+                  )}
+                  <span className="voice-msg-icon">
+                    {(j.status === 'transcribing' || j.status === 'sending') && <span className="voice-spinner" />}
+                    {j.status === 'sent' && <span className="voice-check">✓</span>}
+                    {j.status === 'error' && <span className="voice-error-icon">✕</span>}
+                  </span>
+                </div>
+              ))}
             </div>
-          ))}
+          ) : (
+            /* Expanded: full job rows */
+            jobs.map(j => (
+              <div key={j.id} className={`voice-msg ${j.status}`}>
+                {screenshotUrls.current.has(j.id) && (
+                  <img
+                    src={screenshotUrls.current.get(j.id)}
+                    alt="screenshot"
+                    style={{ width: 48, height: 36, objectFit: 'cover', borderRadius: 4, flexShrink: 0, border: '1px solid #3a3a5e' }}
+                  />
+                )}
+                <span className="voice-msg-icon">
+                  {(j.status === 'transcribing' || j.status === 'sending') && <span className="voice-spinner" />}
+                  {j.status === 'sent' && <span className="voice-check">✓</span>}
+                  {j.status === 'error' && <span className="voice-error-icon">✕</span>}
+                </span>
+                <span className="voice-msg-text">
+                  {j.status === 'transcribing' ? 'Transcribing...' : j.text || j.error || ''}
+                </span>
+                {(j.status === 'transcribing' || j.status === 'sending') && (
+                  <ElapsedTimer startedAt={j.startedAt} />
+                )}
+                {(j.status === 'sent' || j.status === 'error') && (
+                  <button className="voice-msg-dismiss" onClick={() => dismissJob(j.id)} title="Dismiss">✕</button>
+                )}
+              </div>
+            ))
+          )}
         </div>
       )}
     </>

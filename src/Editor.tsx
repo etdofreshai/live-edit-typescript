@@ -2,6 +2,7 @@ import React, { useEffect, useState, useRef } from 'react';
 import './styles.css';
 import { VoiceButton } from './VoiceButton';
 import { IframeWithRetry } from './IframeWithRetry';
+import { TranscriptHistoryModal } from './TranscriptHistoryModal';
 
 interface CacheEntry {
   id: string; repo: string; sha: string; port: number; lastAccessed: number;
@@ -96,6 +97,8 @@ export default function Editor({ initialOwner, initialRepo, initialBranch, initi
   const [envText, setEnvText] = useState('');
   const [startMode, setStartMode] = useState<StartMode>('vite');
   const [consoleLogs, setConsoleLogs] = useState<string[]>([]);
+  const [showTranscriptModal, setShowTranscriptModal] = useState(false);
+  const [transcriptCount, setTranscriptCount] = useState(0);
   const iframeRef = useRef<HTMLIFrameElement>(null);
 
   const activeEntry = cache.find(e => e.id === activeEntryId) || (previewPort ? cache.find(e => e.port === previewPort) : null);
@@ -464,6 +467,22 @@ export default function Editor({ initialOwner, initialRepo, initialBranch, initi
     return () => clearInterval(interval);
   }, []);
 
+  // Poll transcript count for sidebar badge
+  useEffect(() => {
+    const fetchCount = async () => {
+      try {
+        const res = await fetch('/api/transcript-history');
+        if (res.ok) {
+          const data = await res.json();
+          setTranscriptCount(Array.isArray(data) ? data.length : 0);
+        }
+      } catch {}
+    };
+    fetchCount();
+    const interval = setInterval(fetchCount, 10000);
+    return () => clearInterval(interval);
+  }, []);
+
   // Console log interception for preview iframe
   useEffect(() => {
     if (!iframeRef.current || !previewPort) return;
@@ -743,6 +762,17 @@ export default function Editor({ initialOwner, initialRepo, initialBranch, initi
           </div>
         </>}
 
+        <h3>Transcript History</h3>
+        <button
+          className="transcript-history-btn"
+          onClick={() => setShowTranscriptModal(true)}
+        >
+          📜 Voice conversations
+          {transcriptCount > 0 && (
+            <span className="th-badge">{transcriptCount}</span>
+          )}
+        </button>
+
         <h3>Cache ({cache.length}/10)</h3>
         {cache.map(e => (
           <div key={e.id} className="cache-card">
@@ -945,6 +975,10 @@ export default function Editor({ initialOwner, initialRepo, initialBranch, initi
       )}
 
       {showHeader && <VoiceButton context={activeEntry ? { owner: 'etdofreshai', repo: activeEntry.repo, branch: activeEntry.branch, sha: activeEntry.sha } : undefined} iframeRef={iframeRef} consoleLogs={consoleLogs} />}
+
+      {showTranscriptModal && (
+        <TranscriptHistoryModal onClose={() => setShowTranscriptModal(false)} />
+      )}
     </div>
   );
 }
