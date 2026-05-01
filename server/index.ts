@@ -393,8 +393,10 @@ app.post('/api/voice', upload.fields([{ name: 'audio', maxCount: 1 }, { name: 's
   let context: any;
   let consoleLogs: any;
   try {
-    context = req.body.context ? JSON.parse(req.body.context) : undefined;
-    consoleLogs = req.body.consoleLogs ? JSON.parse(req.body.consoleLogs) : undefined;
+    try { context = req.body.context ? JSON.parse(req.body.context) : undefined; }
+    catch { return res.status(400).json({ error: 'invalid context' }); }
+    try { consoleLogs = req.body.consoleLogs ? JSON.parse(req.body.consoleLogs) : undefined; }
+    catch { return res.status(400).json({ error: 'invalid consoleLogs' }); }
     if (context?.repo) validateRepo(context.repo);
     if (context?.branch) validateBranch(context.branch);
     if (context?.sha) validateSha(context.sha);
@@ -553,6 +555,18 @@ app.post('/api/voice', upload.fields([{ name: 'audio', maxCount: 1 }, { name: 's
       if (histEntry) histEntry.status = 'error';
     }
   })();
+});
+
+// Multer error handler — catches file-too-large, too-many-files, etc.
+app.use((err: any, _req: express.Request, res: express.Response, next: express.NextFunction) => {
+  if (err?.name === 'MulterError') {
+    const code = err.code;
+    if (code === 'LIMIT_FILE_SIZE' || code === 'LIMIT_UNEXPECTED_FILE') {
+      return res.status(413).json({ error: 'File too large' });
+    }
+    return res.status(400).json({ error: 'Upload error' });
+  }
+  next(err);
 });
 
 // SHA endpoint for live-reload polling
