@@ -14,6 +14,7 @@ import { webhookRouter, registerWebhook, unregisterWebhook } from './webhook.js'
 import { assertInsideTargets } from './path-safety.js';
 import { validateBranch, validateOwner, validateRepo, validateSha } from './validators.js';
 import { walkBounded } from './file-walk.js';
+import { isAdminAuthorized } from './admin-auth.js';
 import type { CacheEntry } from './cache-manager.js';
 
 import { execFileSync } from 'child_process';
@@ -104,17 +105,8 @@ function markLegacyOwner(res: express.Response) {
   res.setHeader('Warning', `299 - "owner-less repository API routes are deprecated; using ${DEFAULT_OWNER}"`);
 }
 
-function hasAdminToken(req: express.Request): boolean {
-  if (!ADMIN_TOKEN) return true;
-
-  const authorization = req.get('authorization') || '';
-  if (authorization === `Bearer ${ADMIN_TOKEN}`) return true;
-
-  return req.get('x-admin-token') === ADMIN_TOKEN;
-}
-
 function requireAdmin(req: express.Request, res: express.Response, next: express.NextFunction) {
-  if (hasAdminToken(req)) return next();
+  if (isAdminAuthorized(req, ADMIN_TOKEN)) return next();
   return res.status(401).json({ error: 'Unauthorized' });
 }
 
