@@ -13,11 +13,13 @@ export default function App() {
         
         {/* Editor routes */}
         <Route path="/edit" element={<EditorPage />} />
+        <Route path="/edit/:repo" element={<EditorPage />} />
         <Route path="/edit/:owner/:repo" element={<EditorPage />} />
         <Route path="/edit/:owner/:repo/:branch" element={<EditorPage />} />
         <Route path="/edit/:owner/:repo/:branch/:commit" element={<EditorPage />} />
         
         {/* Clean preview routes (no /edit prefix) */}
+        <Route path="/:repo" element={<PreviewPage />} />
         <Route path="/:owner/:repo" element={<PreviewPage />} />
         <Route path="/:owner/:repo/:branch" element={<PreviewPage />} />
         <Route path="/:owner/:repo/:branch/:commit" element={<PreviewPage />} />

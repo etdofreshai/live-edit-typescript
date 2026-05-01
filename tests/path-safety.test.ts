@@ -35,21 +35,25 @@ describe('assertInsideTargets', () => {
 
 describe('safeTargetSubdir', () => {
   it('produces a path inside targets dir', () => {
-    const result = safeTargetSubdir('my-repo', 'abcdef1234567890abcdef1234567890abcdef12');
+    const result = safeTargetSubdir('octocat', 'my-repo', 'abcdef1234567890abcdef1234567890abcdef12');
     expect(result.startsWith(TARGETS_DIR + path.sep)).toBe(true);
   });
 
   it('includes repo name and first 7 chars of sha', () => {
-    const result = safeTargetSubdir('my-repo', 'abcdef1234567890abcdef1234567890abcdef12');
-    expect(result).toContain('my-repo');
+    const result = safeTargetSubdir('octocat', 'my-repo', 'abcdef1234567890abcdef1234567890abcdef12');
+    expect(result).toContain('octocat__my-repo');
     expect(result).toContain('abcdef1');
   });
 
+  it('rejects invalid owner', () => {
+    expect(() => safeTargetSubdir('-evil', 'my-repo', 'abcdef1234567890abcdef1234567890abcdef12')).toThrow('invalid owner');
+  });
+
   it('rejects invalid repo', () => {
-    expect(() => safeTargetSubdir('../evil', 'abcdef1234567890abcdef1234567890abcdef12')).toThrow('invalid repo');
+    expect(() => safeTargetSubdir('octocat', '../evil', 'abcdef1234567890abcdef1234567890abcdef12')).toThrow('invalid repo');
   });
 
   it('rejects invalid sha', () => {
-    expect(() => safeTargetSubdir('my-repo', 'not-a-sha')).toThrow('invalid sha');
+    expect(() => safeTargetSubdir('octocat', 'my-repo', 'not-a-sha')).toThrow('invalid sha');
   });
 });

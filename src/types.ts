@@ -1,5 +1,6 @@
 export interface CacheEntry {
   id: string;
+  owner: string;
   repo: string;
   sha: string;
   port: number;

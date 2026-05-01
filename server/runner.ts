@@ -2,13 +2,12 @@ import { execFileSync, spawn } from 'child_process';
 import { existsSync, rmSync, readFileSync, openSync, closeSync, writeFileSync } from 'fs';
 import path from 'path';
 import type { CacheEntry } from './cache-manager.js';
-import { OWNER } from './github.js';
 import { assertInsideTargets, safeTargetSubdir } from './path-safety.js';
-import { validateBranch, validateRepo, validateSha } from './validators.js';
+import { validateBranch, validateOwner, validateRepo, validateSha } from './validators.js';
 import { waitForPort } from './wait-for-port.js';
 
-export function getTargetDir(repo: string, sha: string): string {
-  return safeTargetSubdir(repo, sha);
+export function getTargetDir(owner: string, repo: string, sha: string): string {
+  return safeTargetSubdir(owner, repo, sha);
 }
 
 const CHILD_ENV_ALLOWLIST = new Set([
@@ -93,6 +92,7 @@ async function terminateChild(child: ReturnType<typeof spawn> | undefined) {
 }
 
 export async function cloneAndStart(
+  owner: string,
   repo: string,
   sha: string,
   port: number,
@@ -103,17 +103,18 @@ export async function cloneAndStart(
     startMode?: 'vite' | 'npm-dev';
   }
 ): Promise<{ dir: string; pid: number; type: 'vite' | 'static' }> {
+  const safeOwner = validateOwner(owner);
   const safeRepo = validateRepo(repo);
   const safeSha = validateSha(sha);
   if (opts?.branch) validateBranch(opts.branch);
-  const dir = safeTargetSubdir(safeRepo, safeSha);
+  const dir = safeTargetSubdir(safeOwner, safeRepo, safeSha);
   let createdDir = false;
   let logFd: number | undefined;
   let child: ReturnType<typeof spawn> | undefined;
 
   try {
     if (!existsSync(dir)) {
-      const cloneUrl = `https://github.com/${OWNER}/${safeRepo}.git`;
+      const cloneUrl = `https://github.com/${safeOwner}/${safeRepo}.git`;
       if (opts?.isLatest) {
         execFileSync('git', ['clone', cloneUrl, dir], { stdio: 'pipe' });
         execFileSync('git', ['checkout', safeSha], { cwd: dir, stdio: 'pipe' });
@@ -258,6 +259,7 @@ export default defineConfig({
 }
 
 export async function pullLatest(entry: CacheEntry, newSha: string): Promise<{ changedFiles: string[] }> {
+  validateOwner(entry.owner);
   validateRepo(entry.repo);
   validateSha(newSha);
   if (!entry.branch) return { changedFiles: [] };

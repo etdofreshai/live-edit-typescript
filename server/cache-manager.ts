@@ -3,6 +3,7 @@ import { safeTargetSubdir } from './path-safety.js';
 
 export interface CacheEntry {
   id: string;
+  owner: string;
   repo: string;
   sha: string;
   port: number;
@@ -41,8 +42,8 @@ class Mutex {
 
 const cacheMutex = new Mutex();
 
-function makeId(repo: string, sha: string) {
-  return safeTargetSubdir(repo, sha).split(/[\\/]/).pop()!;
+function makeId(owner: string, repo: string, sha: string) {
+  return safeTargetSubdir(owner, repo, sha).split(/[\\/]/).pop()!;
 }
 
 function usedPorts(): Set<number> {
@@ -82,8 +83,8 @@ export async function releasePort(port: number) {
   });
 }
 
-export function getEntry(repo: string, sha: string): CacheEntry | undefined {
-  const id = makeId(repo, sha);
+export function getEntry(owner: string, repo: string, sha: string): CacheEntry | undefined {
+  const id = makeId(owner, repo, sha);
   const e = cache.get(id);
   if (e) e.lastAccessed = Date.now();
   return e;

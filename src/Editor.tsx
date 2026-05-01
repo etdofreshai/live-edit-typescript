@@ -16,15 +16,17 @@ import { Branch, CacheEntry, Commit, CompareInfo, PullRequestResult, Repo } from
 type StartMode = 'vite' | 'npm-dev';
 
 const STORAGE_KEY = 'live-edit-state';
+const DEFAULT_OWNER = 'etdofreshai';
 
 interface PersistedState {
+  selectedOwner?: string;
   selectedRepo: string;
   selectedBranch: string;
   activeEntryId: string | null;
   previewPort: number | null;
   sidebarOpen: boolean;
   // Info needed to auto-re-run after server restart
-  lastRun?: { repo: string; sha: string; branch?: string; isLatest?: boolean } | null;
+  lastRun?: { owner?: string; repo: string; sha: string; branch?: string; isLatest?: boolean } | null;
 }
 
 interface CurrentFile {
@@ -72,6 +74,7 @@ export default function Editor({ initialOwner, initialRepo, initialBranch, initi
   const saved = useRef(loadPersistedState());
   // If URL params are provided, don't restore preview state from localStorage
   const hasUrlParams = !!(initialRepo);
+  const [selectedOwner, setSelectedOwner] = useState(initialOwner || saved.current.selectedOwner || DEFAULT_OWNER);
   const [repos, setRepos] = useState<Repo[]>([]);
   const [selectedRepo, setSelectedRepo] = useState(initialRepo || saved.current.selectedRepo || '');
   const [branches, setBranches] = useState<Branch[]>([]);
@@ -118,7 +121,7 @@ export default function Editor({ initialOwner, initialRepo, initialBranch, initi
     
     let path = '/edit';
     if (selectedRepo) {
-      path += `/etdofreshai/${selectedRepo}`;
+      path += `/${selectedOwner}/${selectedRepo}`;
       if (selectedBranch) {
         path += `/${selectedBranch}`;
         if (activeEntry?.sha && activeEntry.repo === selectedRepo) {
@@ -134,7 +137,7 @@ export default function Editor({ initialOwner, initialRepo, initialBranch, initi
     if (currentPath !== path) {
       onNavigateRef.current(path);
     }
-  }, [selectedRepo, selectedBranch, activeEntry?.sha, restoringState, urlUsedLatest]);
+  }, [selectedOwner, selectedRepo, selectedBranch, activeEntry?.sha, restoringState, urlUsedLatest]);
 
   // Handle initial commit from URL
   useEffect(() => {
@@ -156,6 +159,7 @@ export default function Editor({ initialOwner, initialRepo, initialBranch, initi
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
+              owner: initialOwner || DEFAULT_OWNER,
               repo: initialRepo,
               branch: initialBranch,
               envVars: parseEnvText(envText),
@@ -170,6 +174,7 @@ export default function Editor({ initialOwner, initialRepo, initialBranch, initi
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ 
+              owner: initialOwner || DEFAULT_OWNER,
               repo: initialRepo, 
               sha: initialCommit,
               envVars: parseEnvText(envText),
@@ -193,13 +198,14 @@ export default function Editor({ initialOwner, initialRepo, initialBranch, initi
     };
     
     runInitialCommit();
-  }, [initialCommit, initialRepo, initialBranch, restoringState, repos.length]);
+  }, [initialOwner, initialCommit, initialRepo, initialBranch, restoringState, repos.length]);
 
   // Load env vars for selected repo
   useEffect(() => {
     if (selectedRepo) {
+      const key = `${selectedOwner}/${selectedRepo}`;
       try {
-        const stored = localStorage.getItem(`env:${selectedRepo}`);
+        const stored = localStorage.getItem(`env:${key}`);
         if (stored) {
           // Migrate old JSON format to text
           try { const obj = JSON.parse(stored); if (typeof obj === 'object' && !Array.isArray(obj)) { setEnvText(Object.entries(obj).map(([k,v]) => `${k}=${v}`).join('\n')); return; } } catch {}
@@ -211,13 +217,13 @@ export default function Editor({ initialOwner, initialRepo, initialBranch, initi
         setEnvText('');
       }
       try {
-        const mode = localStorage.getItem(`startMode:${selectedRepo}`) as StartMode;
+        const mode = localStorage.getItem(`startMode:${key}`) as StartMode;
         setStartMode(mode || 'vite');
       } catch {
         setStartMode('vite');
       }
     }
-  }, [selectedRepo]);
+  }, [selectedOwner, selectedRepo]);
 
   const parseEnvText = (text: string): Record<string, string> => {
     const vars: Record<string, string> = {};
@@ -234,7 +240,7 @@ export default function Editor({ initialOwner, initialRepo, initialBranch, initi
     if (!selectedRepo) return;
     setEnvText(text);
     try {
-      localStorage.setItem(`env:${selectedRepo}`, text);
+      localStorage.setItem(`env:${selectedOwner}/${selectedRepo}`, text);
     } catch {}
   };
 
@@ -242,16 +248,16 @@ export default function Editor({ initialOwner, initialRepo, initialBranch, initi
     if (!selectedRepo) return;
     setStartMode(mode);
     try {
-      localStorage.setItem(`startMode:${selectedRepo}`, mode);
+      localStorage.setItem(`startMode:${selectedOwner}/${selectedRepo}`, mode);
     } catch {}
   };
 
   // Persist state on changes
   useEffect(() => {
     if (restoringState) return;
-    const lastRun = activeEntry ? { repo: activeEntry.repo, sha: activeEntry.sha, branch: activeEntry.branch, isLatest: activeEntry.isLatest } : null;
-    savePersistedState({ selectedRepo, selectedBranch, activeEntryId, previewPort, sidebarOpen, lastRun });
-  }, [selectedRepo, selectedBranch, activeEntryId, previewPort, sidebarOpen, restoringState, activeEntry]);
+    const lastRun = activeEntry ? { owner: activeEntry.owner, repo: activeEntry.repo, sha: activeEntry.sha, branch: activeEntry.branch, isLatest: activeEntry.isLatest } : null;
+    savePersistedState({ selectedOwner, selectedRepo, selectedBranch, activeEntryId, previewPort, sidebarOpen, lastRun });
+  }, [selectedOwner, selectedRepo, selectedBranch, activeEntryId, previewPort, sidebarOpen, restoringState, activeEntry]);
 
   const showEntry = async (entry: CacheEntry) => {
     setActiveEntryId(entry.id);
@@ -282,7 +288,9 @@ export default function Editor({ initialOwner, initialRepo, initialBranch, initi
   useEffect(() => {
     const init = async () => {
       try {
-        const [repoList, cacheList] = await Promise.all([api<Repo[]>('/api/repos'), api<CacheEntry[]>('/api/cache')]);
+        const ownerForLoad = initialOwner || saved.current.selectedOwner || DEFAULT_OWNER;
+        setSelectedOwner(ownerForLoad);
+        const [repoList, cacheList] = await Promise.all([api<Repo[]>(`/api/repos/${ownerForLoad}`), api<CacheEntry[]>('/api/cache')]);
         setRepos(repoList);
         setCache(cacheList);
 
@@ -290,13 +298,13 @@ export default function Editor({ initialOwner, initialRepo, initialBranch, initi
         if (s.selectedRepo) {
           const repoExists = repoList.some((r: Repo) => r.name === s.selectedRepo);
           if (repoExists) {
-            const branchList = await api<Branch[]>(`/api/repos/${s.selectedRepo}/branches`);
+            const branchList = await api<Branch[]>(`/api/repos/${ownerForLoad}/${s.selectedRepo}/branches`);
             setBranches(branchList);
 
             if (s.selectedBranch) {
               const branchExists = branchList.some((b: Branch) => b.name === s.selectedBranch);
               if (branchExists) {
-                const commitList = await api<Commit[]>(`/api/repos/${s.selectedRepo}/branches/${encodeURIComponent(s.selectedBranch)}/commits`);
+                const commitList = await api<Commit[]>(`/api/repos/${ownerForLoad}/${s.selectedRepo}/branches/${encodeURIComponent(s.selectedBranch)}/commits`);
                 setCommits(commitList);
               } else {
                 setSelectedBranch('');
@@ -311,7 +319,7 @@ export default function Editor({ initialOwner, initialRepo, initialBranch, initi
         // Validate active entry still exists in cache — if not, auto-re-run
         // Skip restore when URL params are provided (URL is source of truth)
         if (s.activeEntryId && !hasUrlParams) {
-          const entryExists = cacheList.some((e: CacheEntry) => e.id === s.activeEntryId);
+                const entryExists = cacheList.some((e: CacheEntry) => e.id === s.activeEntryId);
           if (!entryExists && s.lastRun) {
             // Server restarted — re-run the last entry
             setLoading('restoring');
@@ -320,12 +328,12 @@ export default function Editor({ initialOwner, initialRepo, initialBranch, initi
               if (s.lastRun.isLatest && s.lastRun.branch) {
                 entry = await api<RunResponse>('/api/run-latest', {
                   method: 'POST', headers: { 'Content-Type': 'application/json' },
-                  body: JSON.stringify({ repo: s.lastRun.repo, branch: s.lastRun.branch }),
+                  body: JSON.stringify({ owner: s.lastRun.owner || DEFAULT_OWNER, repo: s.lastRun.repo, branch: s.lastRun.branch }),
                 });
               } else {
                 entry = await api<RunResponse>('/api/run', {
                   method: 'POST', headers: { 'Content-Type': 'application/json' },
-                  body: JSON.stringify({ repo: s.lastRun.repo, sha: s.lastRun.sha }),
+                  body: JSON.stringify({ owner: s.lastRun.owner || DEFAULT_OWNER, repo: s.lastRun.repo, sha: s.lastRun.sha }),
                 });
               }
               if (entry && !entry.error) {
@@ -354,6 +362,12 @@ export default function Editor({ initialOwner, initialRepo, initialBranch, initi
     init();
   }, []);
 
+  const loadReposForOwner = async (owner: string) => {
+    const repoList = await api<Repo[]>(`/api/repos/${owner}`);
+    setRepos(repoList);
+    return repoList;
+  };
+
   const refreshCache = () => api<CacheEntry[]>('/api/cache').then((newCache) => {
     setCache(prev => {
       // Compare ignoring volatile fields (lastAccessed changes on every request)
@@ -369,15 +383,15 @@ export default function Editor({ initialOwner, initialRepo, initialBranch, initi
 
     // Update URL immediately when repo is selected
     if (onNavigate) {
-      onNavigate(`/edit/etdofreshai/${name}`);
+      onNavigate(`/edit/${selectedOwner}/${name}`);
     }
 
     try {
-      const branchList = await api<Branch[]>(`/api/repos/${name}/branches`);
+      const branchList = await api<Branch[]>(`/api/repos/${selectedOwner}/${name}/branches`);
       setBranches(branchList);
 
       // Auto-select branch: prefer one that's already running in cache, else default branch
-      const cachedEntry = cache.find(e => e.repo === name);
+      const cachedEntry = cache.find(e => e.owner === selectedOwner && e.repo === name);
       const cachedBranch = cachedEntry?.branch;
       const defaultBranch = branchList.find((b: Branch) => b.name === 'main')?.name
         || branchList.find((b: Branch) => b.name === 'master')?.name
@@ -388,10 +402,31 @@ export default function Editor({ initialOwner, initialRepo, initialBranch, initi
     } catch {}
   };
 
+  const changeOwner = async (owner: string) => {
+    setSelectedOwner(owner);
+    setSelectedRepo('');
+    setSelectedBranch('');
+    setBranches([]);
+    setCommits([]);
+    setCompareInfo(null);
+    setPrResult(null);
+    setPrError('');
+    if (onNavigate) onNavigate('/edit');
+    if (!owner) {
+      setRepos([]);
+      return;
+    }
+    try {
+      await loadReposForOwner(owner);
+    } catch (e: unknown) {
+      setError(errorMessage(e));
+    }
+  };
+
   const handleCreateBranch = async (fromBranch: string, name: string) => {
     setBranchError('');
     try {
-      const res = await fetch(`/api/repos/${selectedRepo}/branches`, {
+      const res = await fetch(`/api/repos/${selectedOwner}/${selectedRepo}/branches`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ name, from: fromBranch }),
@@ -400,7 +435,7 @@ export default function Editor({ initialOwner, initialRepo, initialBranch, initi
       if (!res.ok) { setBranchError(data.error || 'Failed to create branch'); return; }
       setBranchFrom(null);
       setNewBranchName('');
-      setBranches(await api<Branch[]>(`/api/repos/${selectedRepo}/branches`));
+      setBranches(await api<Branch[]>(`/api/repos/${selectedOwner}/${selectedRepo}/branches`));
       selectBranch(name);
     } catch (e: unknown) { setBranchError(errorMessage(e)); }
   };
@@ -413,13 +448,13 @@ export default function Editor({ initialOwner, initialRepo, initialBranch, initi
 
     // Update URL when branch is selected
     if (onNavigate && selectedRepo) {
-      onNavigate(`/edit/etdofreshai/${selectedRepo}/${branch}`);
+      onNavigate(`/edit/${selectedOwner}/${selectedRepo}/${branch}`);
     }
 
     try {
       const [commitList, cmp] = await Promise.all([
-        api<Commit[]>(`/api/repos/${selectedRepo}/branches/${encodeURIComponent(branch)}/commits`),
-        api<CompareInfo & { error?: string }>(`/api/repos/${selectedRepo}/branches/${encodeURIComponent(branch)}/compare`).catch(() => null),
+        api<Commit[]>(`/api/repos/${selectedOwner}/${selectedRepo}/branches/${encodeURIComponent(branch)}/commits`),
+        api<CompareInfo & { error?: string }>(`/api/repos/${selectedOwner}/${selectedRepo}/branches/${encodeURIComponent(branch)}/compare`).catch(() => null),
       ]);
       setCommits(commitList);
       if (cmp && !cmp.error) setCompareInfo(cmp);
@@ -432,7 +467,7 @@ export default function Editor({ initialOwner, initialRepo, initialBranch, initi
     setPrError('');
     setPrResult(null);
     try {
-      const res = await api<PullRequestResult>(`/api/repos/${selectedRepo}/pulls`, {
+      const res = await api<PullRequestResult>(`/api/repos/${selectedOwner}/${selectedRepo}/pulls`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -452,7 +487,7 @@ export default function Editor({ initialOwner, initialRepo, initialBranch, initi
     try {
       const entry = await api<RunResponse>('/api/run', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ repo: selectedRepo, sha, envVars: parseEnvText(envText), startMode }),
+        body: JSON.stringify({ owner: selectedOwner, repo: selectedRepo, sha, envVars: parseEnvText(envText), startMode }),
       });
       if (entry.error) { setError(entry.error); return; }
       await refreshCache();
@@ -466,7 +501,7 @@ export default function Editor({ initialOwner, initialRepo, initialBranch, initi
     try {
       const entry = await api<RunResponse>('/api/run-latest', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ repo: selectedRepo, branch: selectedBranch, envVars: parseEnvText(envText), startMode }),
+        body: JSON.stringify({ owner: selectedOwner, repo: selectedRepo, branch: selectedBranch, envVars: parseEnvText(envText), startMode }),
       });
       if (entry.error) { setError(entry.error); return; }
       await refreshCache();
@@ -579,7 +614,7 @@ export default function Editor({ initialOwner, initialRepo, initialBranch, initi
           activeEntry={activeEntry}
           previewPort={previewPort}
           sidebarOpen={sidebarOpen}
-          onShowEnvModal={() => { if (activeEntry) { setSelectedRepo(activeEntry.repo); setShowEnvModal(true); } }}
+          onShowEnvModal={() => { if (activeEntry) { setSelectedOwner(activeEntry.owner); setSelectedRepo(activeEntry.repo); setShowEnvModal(true); } }}
           onShowLogModal={async () => { await refreshLog(); setShowLogModal(true); }}
           onToggleSidebar={() => setSidebarOpen(o => !o)}
           onHideHeader={() => setShowHeader(false)}
@@ -598,9 +633,10 @@ export default function Editor({ initialOwner, initialRepo, initialBranch, initi
         <h2><a href="/" style={{ color: 'inherit', textDecoration: 'none' }}>Live Edit TypeScript</a></h2>
         {error && <div className="error-banner">{error}</div>}
 
-        <RepoSelector repos={repos} selectedRepo={selectedRepo} onSelectRepo={selectRepo} />
+        <RepoSelector owner={selectedOwner} repos={repos} selectedRepo={selectedRepo} onOwnerChange={changeOwner} onSelectRepo={selectRepo} />
 
         <BranchList
+          owner={selectedOwner}
           branches={branches}
           selectedRepo={selectedRepo}
           selectedBranch={selectedBranch}
@@ -615,6 +651,7 @@ export default function Editor({ initialOwner, initialRepo, initialBranch, initi
         />
 
         <CommitList
+          owner={selectedOwner}
           commits={commits}
           selectedRepo={selectedRepo}
           selectedBranch={selectedBranch}
@@ -701,7 +738,7 @@ export default function Editor({ initialOwner, initialRepo, initialBranch, initi
         />
       )}
 
-      {showHeader && <VoiceButton context={activeEntry ? { owner: 'etdofreshai', repo: activeEntry.repo, branch: activeEntry.branch, sha: activeEntry.sha } : undefined} iframeRef={iframeRef} consoleLogs={consoleLogs} />}
+      {showHeader && <VoiceButton context={activeEntry ? { owner: activeEntry.owner, repo: activeEntry.repo, branch: activeEntry.branch, sha: activeEntry.sha } : undefined} iframeRef={iframeRef} consoleLogs={consoleLogs} />}
 
       {showTranscriptModal && (
         <TranscriptHistoryModal onClose={() => setShowTranscriptModal(false)} />

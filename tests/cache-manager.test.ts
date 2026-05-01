@@ -19,11 +19,13 @@ vi.mock('../server/runner.js', () => ({
 }));
 
 function makeEntry(overrides: Partial<CacheEntry> = {}): CacheEntry {
+  const owner = overrides.owner ?? 'octocat';
   const repo = overrides.repo ?? 'test-repo';
   const sha = overrides.sha ?? 'abcdef1234567890abcdef1234567890abcdef12';
-  const id = overrides.id ?? makeId(repo, sha);
+  const id = overrides.id ?? makeId(owner, repo, sha);
   return {
     id,
+    owner,
     repo,
     sha,
     port: overrides.port ?? 5174,
@@ -94,13 +96,22 @@ describe('getEntry', () => {
   it('finds entry by repo and sha', async () => {
     const entry = makeEntry({ repo: 'findme', sha: 'abcdef1234567890abcdef1234567890abcdef12' });
     await addEntry(entry);
-    const found = getEntry('findme', 'abcdef1234567890abcdef1234567890abcdef12');
+    const found = getEntry('octocat', 'findme', 'abcdef1234567890abcdef1234567890abcdef12');
     expect(found).toBeDefined();
     expect(found!.repo).toBe('findme');
   });
 
   it('returns undefined for unknown repo/sha', () => {
-    expect(getEntry('unknown', '0000000000000000000000000000000000000000')).toBeUndefined();
+    expect(getEntry('octocat', 'unknown', '0000000000000000000000000000000000000000')).toBeUndefined();
+  });
+
+  it('distinguishes identical repo and sha under different owners', async () => {
+    const sha = 'abcdef1234567890abcdef1234567890abcdef12';
+    await addEntry(makeEntry({ owner: 'owner-a', repo: 'same-repo', sha, port: 5174 }));
+    await addEntry(makeEntry({ owner: 'owner-b', repo: 'same-repo', sha, port: 5175 }));
+
+    expect(getEntry('owner-a', 'same-repo', sha)?.owner).toBe('owner-a');
+    expect(getEntry('owner-b', 'same-repo', sha)?.owner).toBe('owner-b');
   });
 
   it('updates lastAccessed on lookup', async () => {
@@ -108,7 +119,7 @@ describe('getEntry', () => {
     entry.lastAccessed = 1000;
     await addEntry(entry);
     const before = Date.now();
-    const found = getEntry('accessed', 'abcdef1234567890abcdef1234567890abcdef12');
+    const found = getEntry('octocat', 'accessed', 'abcdef1234567890abcdef1234567890abcdef12');
     expect(found!.lastAccessed).toBeGreaterThanOrEqual(before);
   });
 });
@@ -119,7 +130,7 @@ describe('evictIfNeeded', () => {
   it('does nothing when under MAX_ENTRIES', async () => {
     await addEntry(makeEntry({ repo: 'keep' }));
     await evictIfNeeded();
-    expect(getEntry('keep', 'abcdef1234567890abcdef1234567890abcdef12')).toBeDefined();
+    expect(getEntry('octocat', 'keep', 'abcdef1234567890abcdef1234567890abcdef12')).toBeDefined();
   });
 
   it('evicts oldest entry when at capacity', async () => {
@@ -132,7 +143,7 @@ describe('evictIfNeeded', () => {
       }));
     }
     await evictIfNeeded();
-    const id0 = makeId('repo-0', '0000000' + 'f'.repeat(33));
+    const id0 = makeId('octocat', 'repo-0', '0000000' + 'f'.repeat(33));
     expect(getEntryById(id0)).toBeUndefined();
   });
 
@@ -156,7 +167,7 @@ describe('addEntry', () => {
   it('stores and retrieves entry', async () => {
     const entry = makeEntry({ repo: 'add-test' });
     await addEntry(entry);
-    const found = getEntry('add-test', 'abcdef1234567890abcdef1234567890abcdef12');
+    const found = getEntry('octocat', 'add-test', 'abcdef1234567890abcdef1234567890abcdef12');
     expect(found).toBeDefined();
   });
 });

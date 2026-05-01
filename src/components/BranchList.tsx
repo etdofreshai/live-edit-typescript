@@ -1,6 +1,7 @@
 import { Branch } from '../types';
 
 interface BranchListProps {
+  owner: string;
   branches: Branch[];
   selectedRepo: string;
   selectedBranch: string;
@@ -15,6 +16,7 @@ interface BranchListProps {
 }
 
 export function BranchList({
+  owner,
   branches,
   selectedRepo,
   selectedBranch,
@@ -43,7 +45,7 @@ export function BranchList({
                 <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{b.name}</span>
                 <div style={{ display: 'flex', gap: 2, flexShrink: 0 }}>
                   <a
-                    href={`https://github.com/etdofreshai/${selectedRepo}/tree/${b.name}`}
+                    href={`https://github.com/${owner}/${selectedRepo}/tree/${b.name}`}
                     target="_blank"
                     rel="noopener noreferrer"
                     onClick={e => e.stopPropagation()}
