@@ -494,11 +494,12 @@ export default function Editor({ initialOwner, initialRepo, initialBranch, initi
       try {
         const iframeWindow = iframe.contentWindow;
         if (!iframeWindow) return;
+        const iframeConsole = (iframeWindow as Window & typeof globalThis).console;
 
         const originalConsole = {
-          log: iframeWindow.console.log,
-          warn: iframeWindow.console.warn,
-          error: iframeWindow.console.error,
+          log: iframeConsole.log,
+          warn: iframeConsole.warn,
+          error: iframeConsole.error,
         };
 
         const addToBuffer = (level: string, args: any[]) => {
@@ -511,17 +512,17 @@ export default function Editor({ initialOwner, initialRepo, initialBranch, initi
           setConsoleLogs([...buffer]);
         };
 
-        iframeWindow.console.log = function(...args: any[]) {
+        iframeConsole.log = function(...args: any[]) {
           addToBuffer('log', args);
           originalConsole.log.apply(this, args);
         };
 
-        iframeWindow.console.warn = function(...args: any[]) {
+        iframeConsole.warn = function(...args: any[]) {
           addToBuffer('warn', args);
           originalConsole.warn.apply(this, args);
         };
 
-        iframeWindow.console.error = function(...args: any[]) {
+        iframeConsole.error = function(...args: any[]) {
           addToBuffer('error', args);
           originalConsole.error.apply(this, args);
         };
