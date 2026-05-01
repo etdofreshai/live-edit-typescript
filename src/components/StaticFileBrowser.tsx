@@ -25,6 +25,25 @@ export function StaticFileBrowser({
   onSetExpandedDirs,
   onViewFile,
 }: StaticFileBrowserProps) {
+  const toggleDir = (dir: string) => {
+    onSetExpandedDirs(prev => {
+      const next = new Set(prev);
+      next.has(dir) ? next.delete(dir) : next.add(dir);
+      return next;
+    });
+  };
+
+  const handleClick = (item: string, isDir: boolean) => {
+    isDir ? toggleDir(item) : onViewFile(cacheId, item);
+  };
+
+  const handleKeyDown = (e: React.KeyboardEvent, item: string, isDir: boolean) => {
+    if (e.key === 'Enter' || e.key === ' ') {
+      e.preventDefault();
+      handleClick(item, isDir);
+    }
+  };
+
   const renderItems = (parentPath: string, depth: number): React.ReactNode[] => {
     const items = files
       .filter(p => {
@@ -37,28 +56,25 @@ export function StaticFileBrowser({
         if (aD !== bD) return aD ? -1 : 1;
         return a.localeCompare(b);
       });
+
     return items.map(item => {
       const isDir = item.endsWith('/');
       const expanded = expandedDirs.has(item);
-      const name = item.replace(/\/$/, '').split('/').pop()!;
+      const name = item.replace(/\/$/, '').split('/').pop() ?? item;
       const isSelected = currentFile?.path === item;
+
       return (
         <div key={item}>
           <div
-            onClick={() => isDir
-              ? onSetExpandedDirs(prev => { const n = new Set(prev); n.has(item) ? n.delete(item) : n.add(item); return n; })
-              : onViewFile(cacheId, item)
-            }
-            style={{
-              padding: '3px 8px', paddingLeft: 8 + depth * 16, cursor: 'pointer',
-              background: isSelected ? 'rgba(137, 180, 250, 0.15)' : 'transparent',
-              color: isSelected ? '#89b4fa' : '#cdd6f4',
-              whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
-            }}
-            onMouseEnter={e => { if (!isSelected) e.currentTarget.style.background = 'rgba(255,255,255,0.05)'; }}
-            onMouseLeave={e => { if (!isSelected) e.currentTarget.style.background = 'transparent'; }}
+            role="button"
+            tabIndex={0}
+            className={`sfb-item${isSelected ? ' selected' : ''}`}
+            style={{ paddingLeft: 8 + depth * 16 }}
+            onClick={() => handleClick(item, isDir)}
+            onKeyDown={e => handleKeyDown(e, item, isDir)}
+            aria-expanded={isDir ? expanded : undefined}
           >
-            <span style={{ marginRight: 4 }}>{isDir ? (expanded ? '📂' : '📁') : '📄'}</span>
+            <span className="sfb-item-icon">{isDir ? (expanded ? '📂' : '📁') : '📄'}</span>
             {name}
           </div>
           {isDir && expanded && renderItems(item, depth + 1)}
@@ -68,38 +84,38 @@ export function StaticFileBrowser({
   };
 
   return (
-    <div style={{ display: 'flex', height: '100%' }}>
-      <div style={{ width: 260, borderRight: '1px solid #2a2a3e', overflow: 'auto', fontSize: 13, flexShrink: 0, background: '#1a1a2e' }}>
+    <div className="sfb-root">
+      <div className="sfb-tree">
         {renderItems('', 0)}
         {filesTruncated && (
-          <div style={{ padding: '4px 8px', fontSize: 11, color: '#f9e2af', borderTop: '1px solid #2a2a3e' }}>
+          <div className="sfb-truncated">
             Results truncated — too many files
           </div>
         )}
       </div>
-      <div style={{ flex: 1, overflow: 'auto', display: 'flex', flexDirection: 'column', background: '#16161e' }}>
+      <div className="sfb-preview">
         {currentFile ? (
           <>
-            <div style={{ padding: '6px 12px', borderBottom: '1px solid #2a2a3e', fontSize: 12, color: '#8888aa', background: '#1a1a2e' }}>
+            <div className="sfb-breadcrumb">
               {currentFile.path.split('/').map((part, i, arr) => (
                 <span key={i}>
-                  {i > 0 && <span style={{ margin: '0 2px', color: '#555' }}>/</span>}
-                  <span style={{ color: i === arr.length - 1 ? '#e0e0e0' : '#8888aa' }}>{part}</span>
+                  {i > 0 && <span className="sfb-breadcrumb-sep">/</span>}
+                  <span className={i === arr.length - 1 ? 'sfb-breadcrumb-last' : ''}>{part}</span>
                 </span>
               ))}
             </div>
             {currentFile.binary ? (
-              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', flex: 1, color: '#6b7280' }}>
+              <div className="sfb-binary">
                 Binary file — cannot preview
               </div>
             ) : (
-              <pre style={{ margin: 0, padding: 12, fontSize: 13, fontFamily: 'ui-monospace, monospace', overflow: 'auto', flex: 1, background: '#16161e', color: '#cdd6f4', lineHeight: 1.5 }}>
+              <pre className="sfb-content">
                 {currentFile.content}
               </pre>
             )}
           </>
         ) : (
-          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', flex: 1, color: '#6b7280' }}>
+          <div className="sfb-empty">
             Select a file to view
           </div>
         )}

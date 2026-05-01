@@ -403,6 +403,47 @@ body {
   100% { opacity: 0; transform: translateY(10px); }
 }
 
+/* === Static File Browser === */
+.sfb-root { display: flex; height: 100%; }
+.sfb-tree {
+  width: 260px; border-right: 1px solid var(--border-subtle);
+  overflow: auto; font-size: 13px; flex-shrink: 0;
+  background: var(--bg-sidebar);
+}
+.sfb-item {
+  padding: 3px 8px; cursor: pointer; color: var(--text-primary);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.sfb-item:hover { background: var(--bg-sidebar-hover); }
+.sfb-item.selected { background: rgba(137, 180, 250, 0.15); color: var(--accent); }
+.sfb-item.selected:hover { background: rgba(137, 180, 250, 0.2); }
+.sfb-item:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+.sfb-item-icon { margin-right: 4px; }
+.sfb-truncated {
+  padding: 4px 8px; font-size: 11px; color: #f9e2af;
+  border-top: 1px solid var(--border-subtle);
+}
+.sfb-preview {
+  flex: 1; overflow: auto; display: flex; flex-direction: column;
+  background: var(--bg-content);
+}
+.sfb-breadcrumb {
+  padding: 6px 12px; border-bottom: 1px solid var(--border-subtle);
+  font-size: 12px; color: var(--text-secondary); background: var(--bg-sidebar);
+}
+.sfb-breadcrumb-sep { margin: 0 2px; color: var(--text-muted); }
+.sfb-breadcrumb-last { color: var(--text-primary); }
+.sfb-binary, .sfb-empty {
+  display: flex; align-items: center; justify-content: center;
+  flex: 1; color: var(--text-muted);
+}
+.sfb-content {
+  margin: 0; padding: 12px; font-size: 13px;
+  font-family: 'SF Mono', 'Cascadia Code', 'Fira Code', monospace;
+  overflow: auto; flex: 1; background: var(--bg-content);
+  color: var(--text-primary); line-height: 1.5;
+}
+
 /* === Transcript History sidebar button === */
 .transcript-history-btn {
   display: flex;
