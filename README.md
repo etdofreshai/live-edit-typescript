@@ -81,7 +81,7 @@ However, this means:
 ### Port Configuration
 
 - **Don't hardcode `port` in `vite.config.ts`** for the Vite dev server. Live Edit assigns ports dynamically (5174-5273, 100-slot pool) via `--port` CLI flag. If you hardcode a port, it may conflict.
-- If your project has a backend server, use a separate `BACKEND_PORT` env var (not `PORT`, which could conflict with Vite).
+- If your project has a backend server, use a separate `BACKEND_PORT` env var (not `PORT`, which could conflict with the Vite dev server or the Live Edit runtime). See [Ports](#ports) below.
 
 ### Full-Stack Projects (Frontend + Backend)
 
@@ -311,10 +311,23 @@ Live Edit clones and runs code from GitHub repos. Preview code should be treated
 - No `WEBHOOK_SECRET` in development → falls back to an insecure dev placeholder
 - No `GITHUB_TOKEN` or `WEBHOOK_URL` → webhook registration is skipped (30s polling fallback)
 
-### Port Pool and Caching
+### Ports
 
-- **Preview port pool:** 5174-5273 (100 slots, dynamically assigned)
-- **Shared npm cache:** stores registry metadata and tarballs at `LIVE_EDIT_NPM_CACHE` or the OS temp dir. Each target repo still gets its own `node_modules` for lockfile isolation.
+The platform uses three distinct port ranges, each serving a different purpose:
+
+| Purpose | Default / Range | Configuration |
+|---------|----------------|---------------|
+| API server (Express backend) | `3000` | `PORT=<port>` env var |
+| Frontend dev server (Live Edit UI) | `5173` | internal only |
+| Preview apps (target Vite servers) | `5174-5273` | dynamically assigned |
+
+**API server port.** The Express backend defaults to `3000`. Set `PORT=<port>` (e.g., `PORT=8080 npm run dev`) to run the API server on a different port.
+
+**Preview app port pool.** Each launched preview app receives a port from the `5174-5273` range (100 slots, LRU eviction). This pool is entirely separate from the API server — the two never share ports.
+
+**Project backends must use `BACKEND_PORT`.** When a full-stack project runs its own backend inside a Live Edit preview, it should read `BACKEND_PORT` for its listen port — not `PORT`. The `PORT` variable is reserved for the Vite dev server and Live Edit runtime; using it for a project backend causes port conflicts. This is why the auto-backend plugin example passes `BACKEND_PORT` explicitly.
+
+**Shared npm cache** stores registry metadata and tarballs at `LIVE_EDIT_NPM_CACHE` or the OS temp dir. Each target repo still gets its own `node_modules` for lockfile isolation.
 
 ### Env Var Editor
 
