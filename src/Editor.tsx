@@ -60,7 +60,7 @@ function savePersistedState(state: PersistedState) {
   try { localStorage.setItem(STORAGE_KEY, JSON.stringify(state)); } catch {}
 }
 
-import { api } from './api';
+import { api, apiFetch } from './api';
 
 interface EditorProps {
   initialOwner?: string;
@@ -426,7 +426,7 @@ export default function Editor({ initialOwner, initialRepo, initialBranch, initi
   const handleCreateBranch = async (fromBranch: string, name: string) => {
     setBranchError('');
     try {
-      const res = await fetch(`/api/repos/${selectedOwner}/${selectedRepo}/branches`, {
+      const res = await apiFetch(`/api/repos/${selectedOwner}/${selectedRepo}/branches`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ name, from: fromBranch }),
@@ -546,7 +546,7 @@ export default function Editor({ initialOwner, initialRepo, initialBranch, initi
   useEffect(() => {
     const fetchCount = async () => {
       try {
-        const res = await fetch('/api/transcript-history');
+        const res = await apiFetch('/api/transcript-history');
         if (res.ok) {
           const data = await res.json();
           setTranscriptCount(Array.isArray(data) ? data.length : 0);

@@ -72,6 +72,8 @@ body {
   transition: all 0.15s ease;
 }
 .top-bar-btn:hover { background: var(--bg-sidebar-hover); color: var(--text-primary); }
+.admin-token-btn.active { color: var(--accent-green); border-color: var(--accent-green-dim); }
+.admin-token-clear { padding-inline: 6px; color: var(--text-muted); }
 
 /* Top bar info — progressive overflow hiding via container queries */
 .top-bar-info {

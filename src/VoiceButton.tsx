@@ -1,4 +1,5 @@
 import React, { useState, useRef, useEffect, useCallback } from 'react';
+import { apiFetch } from './api';
 import { soundStartRecord, soundStopRecord, soundTranscribed, soundSent, soundError } from './sounds';
 
 async function captureIframeScreenshot(iframe: HTMLIFrameElement): Promise<Blob | null> {
@@ -117,7 +118,7 @@ export function VoiceButton({ context, iframeRef, consoleLogs }: VoiceButtonProp
   useEffect(() => {
     const poll = async () => {
       try {
-        const res = await fetch(`${import.meta.env.BASE_URL}api/voice/jobs`);
+        const res = await apiFetch(`${import.meta.env.BASE_URL}api/voice/jobs`);
         if (res.ok) {
           const serverJobs: VoiceJob[] = await res.json();
 
@@ -150,7 +151,7 @@ export function VoiceButton({ context, iframeRef, consoleLogs }: VoiceButtonProp
 
   const dismissJob = async (id: string) => {
     try {
-      await fetch(`${import.meta.env.BASE_URL}api/voice/jobs/${id}`, { method: 'DELETE' });
+      await apiFetch(`${import.meta.env.BASE_URL}api/voice/jobs/${id}`, { method: 'DELETE' });
       const url = screenshotUrls.current.get(id);
       if (url) { URL.revokeObjectURL(url); screenshotUrls.current.delete(id); }
       setJobs(prev => prev.filter(j => j.id !== id));
@@ -187,7 +188,7 @@ export function VoiceButton({ context, iframeRef, consoleLogs }: VoiceButtonProp
         }
 
         try {
-          const res = await fetch(`${import.meta.env.BASE_URL}api/voice`, {
+          const res = await apiFetch(`${import.meta.env.BASE_URL}api/voice`, {
             method: 'POST', body: formData,
           });
           if (res.ok && screenshotBlob) {
