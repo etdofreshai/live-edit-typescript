@@ -59,6 +59,7 @@ export default function Editor({ initialOwner, initialRepo, initialBranch, initi
   const [sidebarOpen, setSidebarOpen] = useState(saved.current.sidebarOpen ?? true);
   const [activeEntryId, setActiveEntryId] = useState<string | null>(hasUrlParams ? null : (saved.current.activeEntryId ?? null));
   const [files, setFiles] = useState<string[]>([]);
+  const [filesTruncated, setFilesTruncated] = useState(false);
   const [currentFile, setCurrentFile] = useState<{ path: string; content?: string; binary?: boolean } | null>(null);
   const [expandedDirs, setExpandedDirs] = useState<Set<string>>(new Set());
   const [restoringState, setRestoringState] = useState(true);
@@ -232,8 +233,9 @@ export default function Editor({ initialOwner, initialRepo, initialBranch, initi
     if (entry.type === 'static') {
       setPreviewPort(null);
       try {
-        const fileList = await api(`/api/cache/${entry.id}/files`);
-        setFiles(fileList);
+        const result = await api(`/api/cache/${entry.id}/files`);
+        setFiles(result.files ?? result);
+        setFilesTruncated(!!result.truncated);
       } catch {}
       setCurrentFile(null);
       setExpandedDirs(new Set());
@@ -851,6 +853,11 @@ export default function Editor({ initialOwner, initialRepo, initialBranch, initi
                   };
                   return renderItems('', 0);
                 })()}
+                {filesTruncated && (
+                  <div style={{ padding: '4px 8px', fontSize: 11, color: '#f9e2af', borderTop: '1px solid #2a2a3e' }}>
+                    Results truncated — too many files
+                  </div>
+                )}
               </div>
               <div style={{ flex: 1, overflow: 'auto', display: 'flex', flexDirection: 'column', background: '#16161e' }}>
                 {currentFile ? (

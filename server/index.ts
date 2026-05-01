@@ -12,6 +12,7 @@ import { cloneAndStart, pullLatest, getServerLog, stopServer } from './runner.js
 import { webhookRouter, registerWebhook, unregisterWebhook } from './webhook.js';
 import { assertInsideTargets } from './path-safety.js';
 import { validateBranch, validateRepo, validateSha } from './validators.js';
+import { walkBounded } from './file-walk.js';
 
 import { execFileSync } from 'child_process';
 
@@ -62,14 +63,17 @@ const gitInfo = (() => {
 app.get('/api/info', (_req, res) => res.json(gitInfo));
 // Webhook route MUST come before express.json() — it needs raw body
 app.use(webhookRouter);
-app.use(express.json());
+app.use(express.json({ limit: '1mb' }));
 
 app.get('/api/health', (_req, res) => {
   res.json({ ok: true, version, uptime: Math.round(process.uptime()) });
 });
 
 // Multer configuration for voice uploads (audio + optional screenshot)
-const upload = multer({ storage: multer.memoryStorage() });
+const upload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 10 * 1024 * 1024, files: 4, fields: 20 },
+});
 
 // Single reusable proxy instance
 const proxy = httpProxy.createProxyServer({ ws: true, changeOrigin: true });
@@ -282,7 +286,7 @@ app.delete('/api/cache/:id', async (req, res) => {
 });
 
 // File explorer endpoints for static repos
-app.get('/api/cache/:id/files', (req, res) => {
+app.get('/api/cache/:id/files', async (req, res) => {
   const entry = getEntryById(req.params.id);
   if (!entry) return res.status(404).json({ error: 'Not found' });
   try {
@@ -291,29 +295,15 @@ app.get('/api/cache/:id/files', (req, res) => {
     return res.status(400).json({ error: validationMessage(e) });
   }
 
-  const files: string[] = [];
-  const walk = (dir: string, prefix: string) => {
-    for (const item of fs.readdirSync(dir, { withFileTypes: true })) {
-      if (item.name === '.git' || item.name === 'node_modules') continue;
-      const rel = prefix ? `${prefix}/${item.name}` : item.name;
-      if (item.isDirectory()) {
-        files.push(rel + '/');
-        walk(pathModule.join(dir, item.name), rel);
-      } else {
-        files.push(rel);
-      }
-    }
-  };
   try {
-    walk(entry.dir, '');
-    files.sort();
-    res.json(files);
+    const result = await walkBounded(entry.dir);
+    res.json(result);
   } catch (e: any) {
     res.status(500).json({ error: e.message });
   }
 });
 
-app.get('/api/cache/:id/files/*', (req, res) => {
+app.get('/api/cache/:id/files/*', async (req, res) => {
   const entry = getEntryById(req.params.id);
   if (!entry) return res.status(404).json({ error: 'Not found' });
 
@@ -324,10 +314,10 @@ app.get('/api/cache/:id/files/*', (req, res) => {
   try {
     assertInsideTargets(fullPath);
     if (!isInsideDir(fullPath, entry.dir)) throw new Error('path outside entry');
-    const stat = fs.statSync(fullPath);
+    const stat = await fs.promises.stat(fullPath);
     if (stat.size > 500_000) return res.json({ binary: true, path: filePath });
 
-    const buf = fs.readFileSync(fullPath);
+    const buf = await fs.promises.readFile(fullPath);
     // Check if binary by looking for null bytes in first 8KB
     const sample = buf.subarray(0, 8192);
     if (sample.includes(0)) return res.json({ binary: true, path: filePath });
@@ -407,8 +397,10 @@ app.post('/api/voice', upload.fields([{ name: 'audio', maxCount: 1 }, { name: 's
   let context: any;
   let consoleLogs: any;
   try {
-    context = req.body.context ? JSON.parse(req.body.context) : undefined;
-    consoleLogs = req.body.consoleLogs ? JSON.parse(req.body.consoleLogs) : undefined;
+    try { context = req.body.context ? JSON.parse(req.body.context) : undefined; }
+    catch { return res.status(400).json({ error: 'invalid context' }); }
+    try { consoleLogs = req.body.consoleLogs ? JSON.parse(req.body.consoleLogs) : undefined; }
+    catch { return res.status(400).json({ error: 'invalid consoleLogs' }); }
     if (context?.repo) validateRepo(context.repo);
     if (context?.branch) validateBranch(context.branch);
     if (context?.sha) validateSha(context.sha);
@@ -567,6 +559,18 @@ app.post('/api/voice', upload.fields([{ name: 'audio', maxCount: 1 }, { name: 's
       if (histEntry) histEntry.status = 'error';
     }
   })();
+});
+
+// Multer error handler — catches file-too-large, too-many-files, etc.
+app.use((err: any, _req: express.Request, res: express.Response, next: express.NextFunction) => {
+  if (err?.name === 'MulterError') {
+    const code = err.code;
+    if (code === 'LIMIT_FILE_SIZE' || code === 'LIMIT_UNEXPECTED_FILE') {
+      return res.status(413).json({ error: 'File too large' });
+    }
+    return res.status(400).json({ error: 'Upload error' });
+  }
+  next(err);
 });
 
 // SHA endpoint for live-reload polling
