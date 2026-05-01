@@ -5,6 +5,7 @@ import type { CacheEntry } from './cache-manager.js';
 import { OWNER } from './github.js';
 import { assertInsideTargets, safeTargetSubdir } from './path-safety.js';
 import { validateBranch, validateRepo, validateSha } from './validators.js';
+import { waitForPort } from './wait-for-port.js';
 
 export function getTargetDir(repo: string, sha: string): string {
   return safeTargetSubdir(repo, sha);
@@ -60,6 +61,37 @@ function installDependencies(dir: string, env?: Record<string, string>) {
   });
 }
 
+function lastLogLines(dir: string, maxLines = 200): string {
+  const log = getServerLog(dir).trim();
+  if (!log) return '';
+  return log.split(/\r?\n/).slice(-maxLines).join('\n');
+}
+
+async function terminateChild(child: ReturnType<typeof spawn> | undefined) {
+  if (!child?.pid) return;
+  try {
+    process.kill(-child.pid, 'SIGTERM');
+  } catch {
+    try { child.kill('SIGTERM'); } catch {}
+  }
+
+  await new Promise<void>((resolve) => {
+    const timer = setTimeout(() => {
+      try {
+        process.kill(-child.pid!, 'SIGKILL');
+      } catch {
+        try { child.kill('SIGKILL'); } catch {}
+      }
+      resolve();
+    }, 2000);
+    timer.unref();
+    child.once('exit', () => {
+      clearTimeout(timer);
+      resolve();
+    });
+  });
+}
+
 export async function cloneAndStart(
   repo: string,
   sha: string,
@@ -75,74 +107,78 @@ export async function cloneAndStart(
   const safeSha = validateSha(sha);
   if (opts?.branch) validateBranch(opts.branch);
   const dir = safeTargetSubdir(safeRepo, safeSha);
+  let createdDir = false;
+  let logFd: number | undefined;
+  let child: ReturnType<typeof spawn> | undefined;
 
-  if (!existsSync(dir)) {
-    const cloneUrl = `https://github.com/${OWNER}/${safeRepo}.git`;
-    if (opts?.isLatest) {
-      execFileSync('git', ['clone', cloneUrl, dir], { stdio: 'pipe' });
-      execFileSync('git', ['checkout', safeSha], { cwd: dir, stdio: 'pipe' });
-    } else {
-      execFileSync('git', ['clone', '--depth', '50', cloneUrl, dir], { stdio: 'pipe' });
-      execFileSync('git', ['checkout', safeSha], { cwd: dir, stdio: 'pipe' });
+  try {
+    if (!existsSync(dir)) {
+      const cloneUrl = `https://github.com/${OWNER}/${safeRepo}.git`;
+      if (opts?.isLatest) {
+        execFileSync('git', ['clone', cloneUrl, dir], { stdio: 'pipe' });
+        execFileSync('git', ['checkout', safeSha], { cwd: dir, stdio: 'pipe' });
+      } else {
+        execFileSync('git', ['clone', '--depth', '50', cloneUrl, dir], { stdio: 'pipe' });
+        execFileSync('git', ['checkout', safeSha], { cwd: dir, stdio: 'pipe' });
+      }
+      createdDir = true;
     }
-  }
 
-  // Check if package.json exists — if not, this is a static repo
-  if (!existsSync(path.join(dir, 'package.json'))) {
-    return { dir, pid: 0, type: 'static' };
-  }
+    // Check if package.json exists — if not, this is a static repo
+    if (!existsSync(path.join(dir, 'package.json'))) {
+      return { dir, pid: 0, type: 'static' };
+    }
 
-  // Write .env file if env vars provided
-  if (opts?.envVars && Object.keys(opts.envVars).length > 0) {
-    const envContent = Object.entries(opts.envVars)
-      .map(([key, value]) => `${key}=${value}`)
-      .join('\n');
-    writeFileSync(path.join(dir, '.env'), envContent, 'utf-8');
-  }
+    // Write .env file if env vars provided
+    if (opts?.envVars && Object.keys(opts.envVars).length > 0) {
+      const envContent = Object.entries(opts.envVars)
+        .map(([key, value]) => `${key}=${value}`)
+        .join('\n');
+      writeFileSync(path.join(dir, '.env'), envContent, 'utf-8');
+    }
 
-  const processEnv = buildChildEnv(opts?.envVars || {}, {
-    PORT: String(port),
-    HOST: '0.0.0.0',
-    BASE: `/proxy/${port}/`,
-  });
-  const viteEnv = {
-    ...processEnv,
-    VITE_PORT: String(port),
-    VITE_HOST: '0.0.0.0',
-    VITE_BASE: `/proxy/${port}/`,
-  };
+    const processEnv = buildChildEnv(opts?.envVars || {}, {
+      PORT: String(port),
+      HOST: '0.0.0.0',
+      BASE: `/proxy/${port}/`,
+    });
+    const viteEnv = {
+      ...processEnv,
+      VITE_PORT: String(port),
+      VITE_HOST: '0.0.0.0',
+      VITE_BASE: `/proxy/${port}/`,
+    };
 
-  // Install deps (no lifecycle scripts; scrubbed env)
-  installDependencies(dir, processEnv);
-
-  // Check if this project actually uses Vite
-  const pkgJson = JSON.parse(readFileSync(path.join(dir, 'package.json'), 'utf-8'));
-  const allDeps = { ...pkgJson.dependencies, ...pkgJson.devDependencies };
-  if (!allDeps['vite']) {
-    // Not a Vite project — treat as static
-    return { dir, pid: 0, type: 'static' };
-  }
-
-  // Verify vite is actually usable (npm install can silently produce incomplete installs)
-  const viteCli = path.join(dir, 'node_modules', 'vite', 'dist', 'node', 'cli.js');
-  if (!existsSync(viteCli)) {
-    // Nuke node_modules and retry once
-    console.warn(`[runner] Vite dist missing in ${dir}, retrying install...`);
-    rmSync(path.join(dir, 'node_modules'), { recursive: true, force: true });
+    // Install deps (no lifecycle scripts; scrubbed env)
     installDependencies(dir, processEnv);
-    if (!existsSync(viteCli)) {
-      throw new Error(`Vite install incomplete — ${viteCli} still missing after retry`);
+
+    // Check if this project actually uses Vite
+    const pkgJson = JSON.parse(readFileSync(path.join(dir, 'package.json'), 'utf-8'));
+    const allDeps = { ...pkgJson.dependencies, ...pkgJson.devDependencies };
+    if (!allDeps['vite']) {
+      // Not a Vite project — treat as static
+      return { dir, pid: 0, type: 'static' };
     }
-  }
 
-  const hmrEnabled = !!opts?.isLatest;
-  const startMode = opts?.startMode || 'vite';
+    // Verify vite is actually usable (npm install can silently produce incomplete installs)
+    const viteCli = path.join(dir, 'node_modules', 'vite', 'dist', 'node', 'cli.js');
+    if (!existsSync(viteCli)) {
+      // Nuke node_modules and retry once
+      console.warn(`[runner] Vite dist missing in ${dir}, retrying install...`);
+      rmSync(path.join(dir, 'node_modules'), { recursive: true, force: true });
+      installDependencies(dir, processEnv);
+      if (!existsSync(viteCli)) {
+        throw new Error(`Vite install incomplete — ${viteCli} still missing after retry`);
+      }
+    }
 
-  // Write HMR wrapper config so Vite WebSocket connects through the proxy
-  const wrapperPath = path.join(dir, '.live-edit-vite.config.ts');
-  const hasExistingConfig = existsSync(path.join(dir, 'vite.config.ts')) || existsSync(path.join(dir, 'vite.config.js'));
-  const wrapperContent = hasExistingConfig
-    ? `// Auto-generated by Live Edit — wraps project config with HMR settings
+    const startMode = opts?.startMode || 'vite';
+
+    // Write HMR wrapper config so Vite WebSocket connects through the proxy
+    const wrapperPath = path.join(dir, '.live-edit-vite.config.ts');
+    const hasExistingConfig = existsSync(path.join(dir, 'vite.config.ts')) || existsSync(path.join(dir, 'vite.config.js'));
+    const wrapperContent = hasExistingConfig
+      ? `// Auto-generated by Live Edit — wraps project config with HMR settings
 import { defineConfig, mergeConfig } from 'vite';
 import baseConfig from './vite.config';
 export default mergeConfig(baseConfig, defineConfig({
@@ -151,7 +187,7 @@ export default mergeConfig(baseConfig, defineConfig({
   }
 }));
 `
-    : `// Auto-generated by Live Edit — HMR config for projects without vite.config
+      : `// Auto-generated by Live Edit — HMR config for projects without vite.config
 import { defineConfig } from 'vite';
 export default defineConfig({
   server: {
@@ -160,40 +196,57 @@ export default defineConfig({
   }
 });
 `;
-  writeFileSync(wrapperPath, wrapperContent);
+    writeFileSync(wrapperPath, wrapperContent);
 
-  // Capture stdout/stderr to a log file for debugging
-  const logPath = path.join(dir, '.vite-server.log');
-  const logFd = openSync(logPath, 'w');
+    // Capture stdout/stderr to a log file for debugging
+    const logPath = path.join(dir, '.vite-server.log');
+    logFd = openSync(logPath, 'w');
 
-  let child;
-  if (startMode === 'npm-dev') {
-    // Use npm run dev
-    child = spawn('npm', ['run', 'dev'], {
-      cwd: dir,
-      stdio: ['ignore', logFd, logFd],
-      detached: true,
-      env: viteEnv,
+    if (startMode === 'npm-dev') {
+      // Use npm run dev
+      child = spawn('npm', ['run', 'dev'], {
+        cwd: dir,
+        stdio: ['ignore', logFd, logFd],
+        detached: true,
+        env: viteEnv,
+      });
+    } else {
+      // Use npx vite with flags (default, most reliable)
+      const args = ['vite', '--config', '.live-edit-vite.config.ts', '--port', String(port), '--host', '0.0.0.0', '--strictPort', '--base', `/proxy/${port}/`];
+      child = spawn('npx', args, {
+        cwd: dir,
+        stdio: ['ignore', logFd, logFd],
+        detached: true,
+        env: viteEnv,
+      });
+    }
+
+    child.unref();
+    child.on('exit', () => {
+      if (logFd !== undefined) {
+        try { closeSync(logFd); } catch {}
+        logFd = undefined;
+      }
     });
-  } else {
-    // Use npx vite with flags (default, most reliable)
-    const args = ['vite', '--config', '.live-edit-vite.config.ts', '--port', String(port), '--host', '0.0.0.0', '--strictPort', '--base', `/proxy/${port}/`];
-    child = spawn('npx', args, {
-      cwd: dir,
-      stdio: ['ignore', logFd, logFd],
-      detached: true,
-      env: viteEnv,
+
+    const startup = waitForPort('127.0.0.1', port, { timeoutMs: 30_000 });
+    const childFailed = new Promise<never>((_resolve, reject) => {
+      child!.once('exit', () => reject(new Error(`dev server exited before listening — last log: ${lastLogLines(dir)}`)));
+      child!.once('error', () => reject(new Error(`dev server exited before listening — last log: ${lastLogLines(dir)}`)));
     });
+    await Promise.race([startup, childFailed]);
+
+    return { dir, pid: child.pid!, type: 'vite' };
+  } catch (e) {
+    await terminateChild(child);
+    if (logFd !== undefined) {
+      try { closeSync(logFd); } catch {}
+    }
+    if (createdDir) {
+      try { rmSync(dir, { recursive: true, force: true }); } catch {}
+    }
+    throw e;
   }
-
-  child.unref();
-  child.on('exit', () => {
-    try { closeSync(logFd); } catch {}
-  });
-
-  await new Promise(r => setTimeout(r, 3000));
-
-  return { dir, pid: child.pid!, type: 'vite' };
 }
 
 export async function pullLatest(entry: CacheEntry, newSha: string) {
