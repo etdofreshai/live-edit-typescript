@@ -21,23 +21,65 @@ const PORT_MIN = 5174;
 const PORT_MAX = 5189;
 
 const cache = new Map<string, CacheEntry>();
+const reservedPorts = new Set<number>();
+
+class Mutex {
+  private chain = Promise.resolve();
+
+  async runExclusive<T>(fn: () => T | Promise<T>): Promise<T> {
+    const previous = this.chain;
+    let release!: () => void;
+    this.chain = new Promise<void>(resolve => { release = resolve; });
+    await previous;
+    try {
+      return await fn();
+    } finally {
+      release();
+    }
+  }
+}
+
+const cacheMutex = new Mutex();
 
 function makeId(repo: string, sha: string) {
   return safeTargetSubdir(repo, sha).split(/[\\/]/).pop()!;
 }
 
 function usedPorts(): Set<number> {
-  const s = new Set<number>();
+  const s = new Set<number>(reservedPorts);
   for (const e of cache.values()) s.add(e.port);
   return s;
 }
 
-export function allocatePort(): number | null {
-  const used = usedPorts();
-  for (let p = PORT_MIN; p <= PORT_MAX; p++) {
-    if (!used.has(p)) return p;
+async function evictIfNeededLocked() {
+  while (cache.size + reservedPorts.size >= MAX_ENTRIES) {
+    let oldest: CacheEntry | null = null;
+    for (const e of cache.values()) {
+      if (!oldest || e.lastAccessed < oldest.lastAccessed) oldest = e;
+    }
+    if (oldest) await removeEntryLocked(oldest.id);
+    else break;
   }
-  return null;
+}
+
+export async function allocatePort(): Promise<number | null> {
+  return cacheMutex.runExclusive(async () => {
+    await evictIfNeededLocked();
+    const used = usedPorts();
+    for (let p = PORT_MIN; p <= PORT_MAX; p++) {
+      if (!used.has(p)) {
+        reservedPorts.add(p);
+        return p;
+      }
+    }
+    return null;
+  });
+}
+
+export async function releasePort(port: number) {
+  await cacheMutex.runExclusive(() => {
+    reservedPorts.delete(port);
+  });
 }
 
 export function getEntry(repo: string, sha: string): CacheEntry | undefined {
@@ -47,27 +89,29 @@ export function getEntry(repo: string, sha: string): CacheEntry | undefined {
   return e;
 }
 
-export function addEntry(entry: CacheEntry) {
-  cache.set(entry.id, entry);
+export async function addEntry(entry: CacheEntry) {
+  await cacheMutex.runExclusive(async () => {
+    await evictIfNeededLocked();
+    reservedPorts.delete(entry.port);
+    cache.set(entry.id, entry);
+  });
 }
 
 export async function evictIfNeeded() {
-  while (cache.size >= MAX_ENTRIES) {
-    let oldest: CacheEntry | null = null;
-    for (const e of cache.values()) {
-      if (!oldest || e.lastAccessed < oldest.lastAccessed) oldest = e;
-    }
-    if (oldest) await removeEntry(oldest.id);
-  }
+  await cacheMutex.runExclusive(evictIfNeededLocked);
 }
 
-export async function removeEntry(id: string) {
+async function removeEntryLocked(id: string) {
   const e = cache.get(id);
   if (!e) return false;
   await stopServer(e);
   await removeFiles(e.dir);
   cache.delete(id);
   return true;
+}
+
+export async function removeEntry(id: string) {
+  return cacheMutex.runExclusive(() => removeEntryLocked(id));
 }
 
 export function listEntries(): CacheEntry[] {

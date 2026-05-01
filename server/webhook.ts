@@ -1,7 +1,8 @@
 import crypto from 'crypto';
 import { Router, raw } from 'express';
-import { getLatestEntries, updateEntry } from './cache-manager.js';
+import { addEntry, allocatePort, getLatestEntries, makeId, releasePort, removeEntry, updateEntry } from './cache-manager.js';
 import { pullLatest } from './runner.js';
+import { cloneAndStart, stopServer } from './runner.js';
 import { getBranchHead, OWNER } from './github.js';
 
 const isProduction = process.env.NODE_ENV === 'production';
@@ -29,6 +30,58 @@ function verifySignature(payload: Buffer, signature: string | undefined): boolea
   if (actual.length !== expected.length) return false;
 
   return crypto.timingSafeEqual(actual, expected);
+}
+
+function isProcessAlive(pid: number | undefined): boolean {
+  if (!pid) return false;
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function requiresRestart(changedFiles: string[]): boolean {
+  const restartFiles = new Set(['package.json', 'package-lock.json', 'vite.config.ts', 'vite.config.js']);
+  return changedFiles.some(file => restartFiles.has(file));
+}
+
+async function refreshLatestEntry(entry: ReturnType<typeof getLatestEntries>[number], headSha: string) {
+  const { changedFiles } = await pullLatest(entry, headSha);
+  const shouldRestart = requiresRestart(changedFiles) || !isProcessAlive(entry.pid);
+
+  if (!shouldRestart) {
+    updateEntry(entry.id, { sha: headSha });
+    return;
+  }
+
+  const oldId = entry.id;
+  const port = entry.port || await allocatePort();
+  if (!port) throw new Error('No ports available');
+
+  try {
+    await stopServer(entry);
+    const { dir, pid, type } = await cloneAndStart(entry.repo, headSha, port, {
+      branch: entry.branch,
+      isLatest: true,
+    });
+    if (type === 'static') await releasePort(port);
+    await removeEntry(oldId);
+    await addEntry({
+      ...entry,
+      id: makeId(entry.repo, headSha),
+      sha: headSha,
+      port: type === 'static' ? 0 : port,
+      dir,
+      pid,
+      type,
+      lastAccessed: Date.now(),
+    });
+  } catch (e) {
+    if (!entry.port) await releasePort(port);
+    throw e;
+  }
 }
 
 export const webhookRouter = Router();
@@ -69,8 +122,7 @@ webhookRouter.post('/api/webhook', raw({ type: 'application/json' }), async (req
       const headSha = await getBranchHead(entry.repo, entry.branch!);
       if (headSha !== entry.sha) {
         console.log(`[webhook] ${entry.repo}/${entry.branch}: ${entry.sha.slice(0, 7)} → ${headSha.slice(0, 7)}`);
-        await pullLatest(entry, headSha);
-        updateEntry(entry.id, { sha: headSha });
+        await refreshLatestEntry(entry, headSha);
       }
     } catch (e: any) {
       console.error(`[webhook] Error updating ${entry.repo}/${entry.branch}:`, e.message);
