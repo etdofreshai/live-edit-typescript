@@ -80,7 +80,7 @@ However, this means:
 
 ### Port Configuration
 
-- **Don't hardcode `port` in `vite.config.ts`** for the Vite dev server. Live Edit assigns ports dynamically (5174-5189) via `--port` CLI flag. If you hardcode a port, it may conflict.
+- **Don't hardcode `port` in `vite.config.ts`** for the Vite dev server. Live Edit assigns ports dynamically (5174-5273, 100-slot pool) via `--port` CLI flag. If you hardcode a port, it may conflict.
 - If your project has a backend server, use a separate `BACKEND_PORT` env var (not `PORT`, which could conflict with Vite).
 
 ### Full-Stack Projects (Frontend + Backend)
@@ -254,11 +254,66 @@ For full-stack:
 
 - **Frontend:** Vite + React + TypeScript (port 5173)
 - **Backend:** Express (port 3000) — API + proxy
-- **Target servers:** Ports 5174-5189, 10-slot LRU cache
+- **Target servers:** Ports 5174-5273 (100-slot pool), LRU cache
 - **Proxy:** `http-proxy` — routes `/proxy/{port}/` to target Vite servers
 - **Webhooks:** Auto-registered on GitHub for "latest" tracking, 30s poll fallback
 - **Shared npm cache:** `LIVE_EDIT_NPM_CACHE` or the OS tmp dir caches npm registry metadata and tarballs only; each repo still installs into its own `node_modules` for lockfile isolation
 - **localStorage:** Persists repo/branch/preview state + env vars per repo
+
+### Security Model
+
+Live Edit clones and runs code from GitHub repos. Preview code should be treated as **untrusted** — it executes on the host as child processes.
+
+**Current mitigations:**
+
+- **Input validation** — owner, repo, branch, and SHA are validated with strict regexes before use
+- **`execFileSync`** — all git/npm operations use synchronous exec (no shell injection vectors)
+- **`--ignore-scripts`** — npm install skips `preinstall`/`postinstall` lifecycle scripts
+- **Env allowlist** — child processes only inherit a minimal set of host env vars (`PATH`, `HOME`, `NODE_ENV`, etc.); user-provided env vars are added on top
+- **Safe path handling** — all target directories are resolved and verified to stay inside the `targets/` root
+- **Bounded file walking** — directory tree listing caps depth at 10 levels to prevent runaway traversal
+- **Webhook secret verification** — HMAC-SHA256 signature validation on all incoming webhook payloads
+- **Docker/non-root runtime** — the provided Dockerfile runs as root; for production, add a non-root `USER` directive
+
+**Recommended hardening (not yet implemented):**
+
+- Per-preview containers or sandboxing (e.g., gVisor, nsjail)
+- CPU, memory, and PID quotas per preview process
+- Network egress policy to restrict outbound access from preview servers
+
+### Production Deployment
+
+**Required environment variables:**
+
+| Variable | Purpose |
+|----------|---------|
+| `GITHUB_TOKEN` | Personal access token for cloning repos and registering webhooks. Needs `repo` read scope. |
+| `WEBHOOK_SECRET` | HMAC secret for verifying incoming GitHub webhook payloads. Required when webhooks are enabled. |
+| `WEBHOOK_URL` | Public URL where GitHub should send webhook events. Required for auto-registering hooks. |
+
+**Optional:**
+
+- `LIVE_EDIT_NPM_CACHE` — override the shared npm cache directory (defaults to a temp dir)
+- `ADMIN_TOKEN` — planned protection for admin-level endpoints; not yet implemented
+
+**GitHub token scope:** The token needs read access to repositories in the target org/account. If auto-registering webhooks, it also needs `write:repo_hook` scope.
+
+**Webhook behavior when secrets are missing:**
+
+- No `WEBHOOK_SECRET` in production → webhook endpoint returns 503
+- No `WEBHOOK_SECRET` in development → falls back to an insecure dev placeholder
+- No `GITHUB_TOKEN` or `WEBHOOK_URL` → webhook registration is skipped (30s polling fallback)
+
+### Port Pool and Caching
+
+- **Preview port pool:** 5174-5273 (100 slots, dynamically assigned)
+- **Shared npm cache:** stores registry metadata and tarballs at `LIVE_EDIT_NPM_CACHE` or the OS temp dir. Each target repo still gets its own `node_modules` for lockfile isolation.
+
+### Env Var Editor
+
+The per-repo env editor (⚙️ button) stores values in **browser localStorage**. This is convenient for development but is not appropriate for highly sensitive secrets — any script running in the same origin can read localStorage.
+
+For real secrets (database credentials, API keys), prefer passing non-secret public config through the editor and using a server-side secret store for sensitive values. A future server-side secrets manager is planned.
 
 ### Docker
 
