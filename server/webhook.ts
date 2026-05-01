@@ -9,6 +9,7 @@ const isProduction = process.env.NODE_ENV === 'production';
 const configuredWebhookSecret = process.env.WEBHOOK_SECRET;
 const WEBHOOK_SECRET = configuredWebhookSecret || (isProduction ? undefined : 'dev-only-insecure');
 const TOKEN = process.env.GITHUB_TOKEN;
+const registeredWebhookRepos = new Set<string>();
 
 if (!configuredWebhookSecret) {
   if (isProduction) {
@@ -134,6 +135,12 @@ webhookRouter.post('/api/webhook', raw({ type: 'application/json' }), async (req
 
 // Auto-register webhook on a GitHub repo
 export async function registerWebhook(repo: string, webhookUrl: string): Promise<void> {
+  const repoKey = `${OWNER}/${repo}`;
+  if (registeredWebhookRepos.has(repoKey)) {
+    console.log(`[webhook] Hook already registered for ${repo}`);
+    return;
+  }
+
   if (!TOKEN) {
     console.warn('[webhook] No GITHUB_TOKEN, skipping webhook registration');
     return;
@@ -161,6 +168,7 @@ export async function registerWebhook(repo: string, webhookUrl: string): Promise
       const hooks = await listRes.json() as any[];
       if (hooks.some((h: any) => h.config?.url === webhookUrl)) {
         console.log(`[webhook] Hook already exists for ${repo}`);
+        registeredWebhookRepos.add(repoKey);
         return;
       }
     }
@@ -183,6 +191,7 @@ export async function registerWebhook(repo: string, webhookUrl: string): Promise
 
     if (createRes.ok) {
       console.log(`[webhook] Registered hook for ${repo} → ${webhookUrl}`);
+      registeredWebhookRepos.add(repoKey);
     } else {
       console.warn(`[webhook] Failed to register hook for ${repo}: ${createRes.status}`);
     }
@@ -193,6 +202,9 @@ export async function registerWebhook(repo: string, webhookUrl: string): Promise
 
 // Remove webhook from a GitHub repo
 export async function unregisterWebhook(repo: string): Promise<void> {
+  const repoKey = `${OWNER}/${repo}`;
+  registeredWebhookRepos.delete(repoKey);
+
   if (!TOKEN) return;
 
   const webhookUrl = process.env.WEBHOOK_URL;
