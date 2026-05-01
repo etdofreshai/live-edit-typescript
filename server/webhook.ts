@@ -31,16 +31,59 @@ type GitHubHook = {
   };
 };
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null;
+}
+
+function readString(record: Record<string, unknown>, key: string): string | undefined {
+  const value = record[key];
+  return typeof value === 'string' ? value : undefined;
+}
+
 function errorMessage(e: unknown): string {
   return e instanceof Error ? e.message : String(e ?? '');
 }
 
-function toGitHubPushPayload(value: unknown): GitHubPushPayload {
-  return typeof value === 'object' && value !== null ? value as GitHubPushPayload : {};
+export function toGitHubPushPayload(value: unknown): GitHubPushPayload {
+  if (!isRecord(value)) return {};
+
+  const repositoryValue = value.repository;
+  const repository = isRecord(repositoryValue) ? repositoryValue : undefined;
+  const repositoryOwnerValue = repository?.owner;
+  const repositoryOwner = isRecord(repositoryOwnerValue) ? repositoryOwnerValue : undefined;
+
+  const organizationValue = value.organization;
+  const organization = isRecord(organizationValue) ? organizationValue : undefined;
+
+  return {
+    ref: readString(value, 'ref'),
+    repository: repository ? {
+      name: readString(repository, 'name'),
+      owner: repositoryOwner ? {
+        login: readString(repositoryOwner, 'login'),
+      } : undefined,
+    } : undefined,
+    organization: organization ? {
+      login: readString(organization, 'login'),
+    } : undefined,
+  };
 }
 
-function toGitHubHooks(value: unknown): GitHubHook[] {
-  return Array.isArray(value) ? value as GitHubHook[] : [];
+export function toGitHubHooks(value: unknown): GitHubHook[] {
+  if (!Array.isArray(value)) return [];
+
+  return value.flatMap((hook): GitHubHook[] => {
+    if (!isRecord(hook)) return [];
+
+    const configValue = hook.config;
+    const config = isRecord(configValue) ? configValue : undefined;
+    return [{
+      id: typeof hook.id === 'number' ? hook.id : undefined,
+      config: config ? {
+        url: readString(config, 'url'),
+      } : undefined,
+    }];
+  });
 }
 
 if (!configuredWebhookSecret) {
