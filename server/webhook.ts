@@ -10,6 +10,7 @@ const isProduction = process.env.NODE_ENV === 'production';
 const configuredWebhookSecret = process.env.WEBHOOK_SECRET;
 const WEBHOOK_SECRET = configuredWebhookSecret || (isProduction ? undefined : 'dev-only-insecure');
 const TOKEN = process.env.GITHUB_TOKEN;
+const registeredWebhookRepos = new Set<string>();
 
 if (!configuredWebhookSecret) {
   if (isProduction) {
@@ -142,7 +143,6 @@ webhookRouter.post('/api/webhook', raw({ type: 'application/json' }), async (req
   res.json({ ok: true, updated: matches.length });
 });
 
-// Auto-register webhook on a GitHub repo
 export async function registerWebhook(owner: string, repo: string, webhookUrl: string): Promise<void> {
   if (!TOKEN) {
     console.warn('[webhook] No GITHUB_TOKEN, skipping webhook registration');
@@ -160,6 +160,12 @@ export async function registerWebhook(owner: string, repo: string, webhookUrl: s
 
   const safeOwner = validateOwner(owner);
   const safeRepo = validateRepo(repo);
+  const repoKey = `${safeOwner}/${safeRepo}`;
+  if (registeredWebhookRepos.has(repoKey)) {
+    console.log(`[webhook] Hook already registered for ${repoKey}`);
+    return;
+  }
+
   const headers: Record<string, string> = {
     Accept: 'application/vnd.github+json',
     Authorization: `Bearer ${TOKEN}`,
@@ -172,7 +178,8 @@ export async function registerWebhook(owner: string, repo: string, webhookUrl: s
     if (listRes.ok) {
       const hooks = await listRes.json() as any[];
       if (hooks.some((h: any) => h.config?.url === webhookUrl)) {
-        console.log(`[webhook] Hook already exists for ${safeOwner}/${safeRepo}`);
+        console.log(`[webhook] Hook already exists for ${repoKey}`);
+        registeredWebhookRepos.add(repoKey);
         return;
       }
     }
@@ -194,7 +201,8 @@ export async function registerWebhook(owner: string, repo: string, webhookUrl: s
     });
 
     if (createRes.ok) {
-      console.log(`[webhook] Registered hook for ${safeOwner}/${safeRepo} → ${webhookUrl}`);
+      console.log(`[webhook] Registered hook for ${repoKey} → ${webhookUrl}`);
+      registeredWebhookRepos.add(repoKey);
     } else {
       console.warn(`[webhook] Failed to register hook for ${safeOwner}/${safeRepo}: ${createRes.status}`);
     }
@@ -203,7 +211,6 @@ export async function registerWebhook(owner: string, repo: string, webhookUrl: s
   }
 }
 
-// Remove webhook from a GitHub repo
 export async function unregisterWebhook(owner: string, repo: string): Promise<void> {
   if (!TOKEN) return;
 
@@ -212,6 +219,7 @@ export async function unregisterWebhook(owner: string, repo: string): Promise<vo
 
   const safeOwner = validateOwner(owner);
   const safeRepo = validateRepo(repo);
+  registeredWebhookRepos.delete(`${safeOwner}/${safeRepo}`);
   const headers: Record<string, string> = {
     Accept: 'application/vnd.github+json',
     Authorization: `Bearer ${TOKEN}`,

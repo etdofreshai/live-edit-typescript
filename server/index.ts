@@ -800,8 +800,7 @@ app.use((err: any, _req: express.Request, res: express.Response, next: express.N
 
 // SHA endpoint for live-reload polling
 app.get('/api/cache/:id/sha', (req, res) => {
-  const entries = listEntries();
-  const entry = entries.find((e: any) => e.id === req.params.id);
+  const entry = getEntryById(req.params.id);
   if (!entry) return res.status(404).json({ error: 'not found' });
   res.json({ sha: entry.sha });
 });

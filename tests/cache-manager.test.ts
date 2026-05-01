@@ -221,7 +221,7 @@ describe('SSE events emitter', () => {
     await addEntry(makeEntry({ repo: 'sse-remove' }));
     const handler = vi.fn();
     events.on('change', handler);
-    await removeEntry(makeId('sse-remove', 'abcdef1234567890abcdef1234567890abcdef12'));
+    await removeEntry(makeId('octocat', 'sse-remove', 'abcdef1234567890abcdef1234567890abcdef12'));
     expect(handler).toHaveBeenCalledTimes(1);
     events.off('change', handler);
   });
@@ -230,7 +230,7 @@ describe('SSE events emitter', () => {
     await addEntry(makeEntry({ repo: 'sse-update' }));
     const handler = vi.fn();
     events.on('change', handler);
-    updateEntry(makeId('sse-update', 'abcdef1234567890abcdef1234567890abcdef12'), { sha: 'updated' });
+    updateEntry(makeId('octocat', 'sse-update', 'abcdef1234567890abcdef1234567890abcdef12'), { sha: 'updated' });
     expect(handler).toHaveBeenCalledTimes(1);
     events.off('change', handler);
   });
