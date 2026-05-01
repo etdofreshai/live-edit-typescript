@@ -1,4 +1,4 @@
-import { execFileSync, execSync, spawn } from 'child_process';
+import { execFileSync, spawn } from 'child_process';
 import { existsSync, rmSync, readFileSync, openSync, closeSync, writeFileSync } from 'fs';
 import path from 'path';
 import type { CacheEntry } from './cache-manager.js';
@@ -8,6 +8,16 @@ import { validateBranch, validateRepo, validateSha } from './validators.js';
 
 export function getTargetDir(repo: string, sha: string): string {
   return safeTargetSubdir(repo, sha);
+}
+
+function installDependencies(dir: string) {
+  const hasLockfile = existsSync(path.join(dir, 'package-lock.json'));
+  const args = hasLockfile
+    ? ['ci', '--ignore-scripts']
+    : ['install', '--ignore-scripts', '--no-audit', '--no-fund'];
+
+  // Arbitrary preview repos must not run npm lifecycle scripts on the host by default.
+  execFileSync('npm', args, { cwd: dir, stdio: 'pipe', timeout: 120_000 });
 }
 
 export async function cloneAndStart(
@@ -50,8 +60,7 @@ export async function cloneAndStart(
     writeFileSync(path.join(dir, '.env'), envContent, 'utf-8');
   }
 
-  // Install deps
-  execSync('npm install', { cwd: dir, stdio: 'pipe', timeout: 120_000 });
+  installDependencies(dir);
 
   // Check if this project actually uses Vite
   const pkgJson = JSON.parse(readFileSync(path.join(dir, 'package.json'), 'utf-8'));
@@ -67,7 +76,7 @@ export async function cloneAndStart(
     // Nuke node_modules and retry once
     console.warn(`[runner] Vite dist missing in ${dir}, retrying install...`);
     rmSync(path.join(dir, 'node_modules'), { recursive: true, force: true });
-    execSync('npm install', { cwd: dir, stdio: 'pipe', timeout: 120_000 });
+    installDependencies(dir);
     if (!existsSync(viteCli)) {
       throw new Error(`Vite install incomplete — ${viteCli} still missing after retry`);
     }
@@ -156,7 +165,7 @@ export async function pullLatest(entry: CacheEntry, newSha: string) {
   execFileSync('git', ['reset', '--hard', `origin/${branch}`], { cwd: entry.dir, stdio: 'pipe' });
   // Quick npm install in case deps changed
   try {
-    execSync('npm install', { cwd: entry.dir, stdio: 'pipe', timeout: 60_000 });
+    installDependencies(entry.dir);
   } catch {}
 }
 
