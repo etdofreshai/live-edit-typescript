@@ -229,12 +229,20 @@ export default defineConfig({
       }
     });
 
-    const startup = waitForPort('127.0.0.1', port, { timeoutMs: 30_000 });
+    let rejectStartup: (error: Error) => void = () => {};
+    const onStartupExit = () => rejectStartup(new Error(`dev server exited before listening — last log: ${lastLogLines(dir)}`));
+    const onStartupError = () => rejectStartup(new Error(`dev server exited before listening — last log: ${lastLogLines(dir)}`));
     const childFailed = new Promise<never>((_resolve, reject) => {
-      child!.once('exit', () => reject(new Error(`dev server exited before listening — last log: ${lastLogLines(dir)}`)));
-      child!.once('error', () => reject(new Error(`dev server exited before listening — last log: ${lastLogLines(dir)}`)));
+      rejectStartup = reject;
+      child!.once('exit', onStartupExit);
+      child!.once('error', onStartupError);
     });
-    await Promise.race([startup, childFailed]);
+    try {
+      await Promise.race([waitForPort('127.0.0.1', port, { timeoutMs: 30_000 }), childFailed]);
+    } finally {
+      child.off('exit', onStartupExit);
+      child.off('error', onStartupError);
+    }
 
     return { dir, pid: child.pid!, type: 'vite' };
   } catch (e) {
@@ -249,13 +257,19 @@ export default defineConfig({
   }
 }
 
-export async function pullLatest(entry: CacheEntry, newSha: string) {
+export async function pullLatest(entry: CacheEntry, newSha: string): Promise<{ changedFiles: string[] }> {
   validateRepo(entry.repo);
   validateSha(newSha);
-  if (!entry.branch) return;
+  if (!entry.branch) return { changedFiles: [] };
   const branch = validateBranch(entry.branch);
   assertInsideTargets(entry.dir);
+  const oldSha = validateSha(entry.sha);
   execFileSync('git', ['fetch', 'origin', branch], { cwd: entry.dir, stdio: 'pipe' });
+  const changedFiles = execFileSync('git', ['diff', '--name-only', `${oldSha}..${newSha}`], {
+    cwd: entry.dir,
+    encoding: 'utf-8',
+    stdio: ['ignore', 'pipe', 'pipe'],
+  }).split(/\r?\n/).filter(Boolean);
   execFileSync('git', ['reset', '--hard', `origin/${branch}`], { cwd: entry.dir, stdio: 'pipe' });
   // Quick npm install in case deps changed
   try {
@@ -266,6 +280,7 @@ export async function pullLatest(entry: CacheEntry, newSha: string) {
     });
     installDependencies(entry.dir, env);
   } catch {}
+  return { changedFiles };
 }
 
 export async function stopServer(entry: CacheEntry) {

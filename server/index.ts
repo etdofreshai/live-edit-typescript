@@ -53,6 +53,59 @@ function getWebhookCallbackUrl(): string | null {
   return `http://localhost:${port}/api/webhook`;
 }
 
+function isProcessAlive(pid: number | undefined): boolean {
+  if (!pid) return false;
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function requiresRestart(changedFiles: string[]): boolean {
+  const restartFiles = new Set(['package.json', 'package-lock.json', 'vite.config.ts', 'vite.config.js']);
+  return changedFiles.some(file => restartFiles.has(file));
+}
+
+async function refreshLatestEntry(entry: CacheEntry, headSha: string) {
+  const { changedFiles } = await pullLatest(entry, headSha);
+  const shouldRestart = requiresRestart(changedFiles) || !isProcessAlive(entry.pid);
+
+  if (!shouldRestart) {
+    updateEntry(entry.id, { sha: headSha });
+    return;
+  }
+
+  const oldId = entry.id;
+  const oldDir = entry.dir;
+  const port = entry.port || await allocatePort();
+  if (!port) throw new Error('No ports available');
+
+  try {
+    await stopServer(entry);
+    const { dir, pid, type } = await cloneAndStart(entry.repo, headSha, port, {
+      branch: entry.branch,
+      isLatest: true,
+    });
+    if (type === 'static') await releasePort(port);
+    await removeEntry(oldId);
+    await addEntry({
+      ...entry,
+      id: makeId(entry.repo, headSha),
+      sha: headSha,
+      port: type === 'static' ? 0 : port,
+      dir,
+      pid,
+      type,
+      lastAccessed: Date.now(),
+    });
+  } catch (e) {
+    if (!entry.port) await releasePort(port);
+    throw e;
+  }
+}
+
 // Git info for footer
 const gitInfo = (() => {
   try {
@@ -768,8 +821,7 @@ server.listen(3000, () => {
         const headSha = await getBranchHead(entry.repo, entry.branch!);
         if (headSha !== entry.sha) {
           console.log(`[latest] ${entry.repo}/${entry.branch}: ${entry.sha.slice(0, 7)} → ${headSha.slice(0, 7)}`);
-          await pullLatest(entry, headSha);
-          updateEntry(entry.id, { sha: headSha });
+          await refreshLatestEntry(entry, headSha);
         }
       } catch (e: any) {
         console.error(`[latest] poll error for ${entry.repo}/${entry.branch}:`, e.message);
