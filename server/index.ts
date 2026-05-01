@@ -11,7 +11,7 @@ import { getEntry, addEntry, allocatePort, releasePort, removeEntry, listEntries
 import { cloneAndStart, pullLatest, getServerLog, stopServer } from './runner.js';
 import { webhookRouter, registerWebhook, unregisterWebhook } from './webhook.js';
 import { assertInsideTargets } from './path-safety.js';
-import { validateBranch, validateRepo, validateSha } from './validators.js';
+import { validateBranch, validateOwner, validateRepo, validateSha } from './validators.js';
 import { walkBounded } from './file-walk.js';
 import type { CacheEntry } from './cache-manager.js';
 
@@ -28,10 +28,16 @@ const inflight = new Map<string, Promise<CacheEntry>>();
 function validationMessage(e: unknown): string {
   const message = e instanceof Error ? e.message : '';
   if (message.startsWith('invalid repo:')) return 'invalid repo';
+  if (message.startsWith('invalid owner:')) return 'invalid owner';
   if (message.startsWith('invalid sha:')) return 'invalid sha';
   if (message.startsWith('invalid branch:')) return 'invalid branch';
   if (message === 'path outside targets' || message === 'path outside entry') return 'invalid path';
   return 'invalid input';
+}
+
+function markLegacyOwner(res: express.Response) {
+  res.setHeader('Deprecation', 'true');
+  res.setHeader('Warning', `299 - "owner-less repository API routes are deprecated; using ${DEFAULT_OWNER}"`);
 }
 
 function isInsideDir(absPath: string, dir: string): boolean {
@@ -150,8 +156,30 @@ app.get('/api/repos', async (_req, res) => {
   }
 });
 
+app.get('/api/repos/:owner', async (req, res) => {
+  try {
+    const owner = validateOwner(req.params.owner);
+    res.json(await listRepos(owner));
+  } catch (e: any) {
+    if (e.message?.startsWith('invalid ')) return res.status(400).json({ error: validationMessage(e) });
+    res.status(500).json({ error: e.message });
+  }
+});
+
+app.get('/api/repos/:owner/:repo/branches', async (req, res) => {
+  try {
+    const owner = validateOwner(req.params.owner);
+    const repo = validateRepo(req.params.repo);
+    res.json(await listBranches(owner, repo));
+  } catch (e: any) {
+    if (e.message?.startsWith('invalid ')) return res.status(400).json({ error: validationMessage(e) });
+    res.status(500).json({ error: e.message });
+  }
+});
+
 app.get('/api/repos/:repo/branches', async (req, res) => {
   try {
+    markLegacyOwner(res);
     const repo = validateRepo(req.params.repo);
     res.json(await listBranches(DEFAULT_OWNER, repo));
   } catch (e: any) {
@@ -160,10 +188,29 @@ app.get('/api/repos/:repo/branches', async (req, res) => {
   }
 });
 
+app.post('/api/repos/:owner/:repo/branches', async (req, res) => {
+  const { name, from } = req.body;
+  if (!name || !from) return res.status(400).json({ error: 'name and from required' });
+  try {
+    const owner = validateOwner(req.params.owner);
+    const repo = validateRepo(req.params.repo);
+    const branchName = validateBranch(name);
+    const fromBranch = validateBranch(from);
+    const sha = await getBranchHead(owner, repo, fromBranch);
+    const ref = await createBranch(owner, repo, branchName, sha);
+    res.json({ name, sha, ref: ref.ref });
+  } catch (e: any) {
+    if (e.message?.startsWith('invalid ')) return res.status(400).json({ error: validationMessage(e) });
+    const status = e.message.includes('already exists') ? 409 : 500;
+    res.status(status).json({ error: e.message });
+  }
+});
+
 app.post('/api/repos/:repo/branches', async (req, res) => {
   const { name, from } = req.body;
   if (!name || !from) return res.status(400).json({ error: 'name and from required' });
   try {
+    markLegacyOwner(res);
     const repo = validateRepo(req.params.repo);
     const branchName = validateBranch(name);
     const fromBranch = validateBranch(from);
@@ -177,8 +224,26 @@ app.post('/api/repos/:repo/branches', async (req, res) => {
   }
 });
 
+app.get('/api/repos/:owner/:repo/branches/:branch/compare', async (req, res) => {
+  try {
+    const owner = validateOwner(req.params.owner);
+    const repo = validateRepo(req.params.repo);
+    const branch = validateBranch(req.params.branch);
+    const defaultBranch = await getDefaultBranch(owner, repo);
+    if (branch === defaultBranch) {
+      return res.json({ ahead: 0, behind: 0, defaultBranch });
+    }
+    const cmp = await compareBranches(owner, repo, defaultBranch, branch);
+    res.json({ ahead: cmp.ahead_by, behind: cmp.behind_by, defaultBranch });
+  } catch (e: any) {
+    if (e.message?.startsWith('invalid ')) return res.status(400).json({ error: validationMessage(e) });
+    res.status(500).json({ error: e.message });
+  }
+});
+
 app.get('/api/repos/:repo/branches/:branch/compare', async (req, res) => {
   try {
+    markLegacyOwner(res);
     const repo = validateRepo(req.params.repo);
     const branch = validateBranch(req.params.branch);
     const defaultBranch = await getDefaultBranch(DEFAULT_OWNER, repo);
@@ -193,10 +258,27 @@ app.get('/api/repos/:repo/branches/:branch/compare', async (req, res) => {
   }
 });
 
+app.post('/api/repos/:owner/:repo/pulls', async (req, res) => {
+  const { head, base, title, body } = req.body;
+  if (!head || !base || !title) return res.status(400).json({ error: 'head, base, and title required' });
+  try {
+    const owner = validateOwner(req.params.owner);
+    const repo = validateRepo(req.params.repo);
+    const headBranch = validateBranch(head);
+    const baseBranch = validateBranch(base);
+    const pr = await createPullRequest(owner, repo, title, headBranch, baseBranch, body);
+    res.json({ url: pr.html_url, number: pr.number });
+  } catch (e: any) {
+    if (e.message?.startsWith('invalid ')) return res.status(400).json({ error: validationMessage(e) });
+    res.status(500).json({ error: e.message });
+  }
+});
+
 app.post('/api/repos/:repo/pulls', async (req, res) => {
   const { head, base, title, body } = req.body;
   if (!head || !base || !title) return res.status(400).json({ error: 'head, base, and title required' });
   try {
+    markLegacyOwner(res);
     const repo = validateRepo(req.params.repo);
     const headBranch = validateBranch(head);
     const baseBranch = validateBranch(base);
@@ -208,8 +290,21 @@ app.post('/api/repos/:repo/pulls', async (req, res) => {
   }
 });
 
+app.get('/api/repos/:owner/:repo/branches/:branch/commits', async (req, res) => {
+  try {
+    const owner = validateOwner(req.params.owner);
+    const repo = validateRepo(req.params.repo);
+    const branch = validateBranch(req.params.branch);
+    res.json(await listCommits(owner, repo, branch));
+  } catch (e: any) {
+    if (e.message?.startsWith('invalid ')) return res.status(400).json({ error: validationMessage(e) });
+    res.status(500).json({ error: e.message });
+  }
+});
+
 app.get('/api/repos/:repo/branches/:branch/commits', async (req, res) => {
   try {
+    markLegacyOwner(res);
     const repo = validateRepo(req.params.repo);
     const branch = validateBranch(req.params.branch);
     res.json(await listCommits(DEFAULT_OWNER, repo, branch));
@@ -225,17 +320,19 @@ app.get('/api/cache', (_req, res) => {
 
 app.post('/api/run', async (req, res) => {
   const { envVars, startMode } = req.body;
+  let owner: string;
   let repo: string;
   let sha: string;
-  if (!req.body.repo || !req.body.sha) return res.status(400).json({ error: 'repo and sha required' });
+  if (!req.body.owner || !req.body.repo || !req.body.sha) return res.status(400).json({ error: 'owner, repo, and sha required' });
   try {
+    owner = validateOwner(req.body.owner);
     repo = validateRepo(req.body.repo);
     sha = validateSha(req.body.sha);
   } catch (e) {
     return res.status(400).json({ error: validationMessage(e) });
   }
 
-  const inflightKey = `${repo}:${sha}`;
+  const inflightKey = `${owner}:${repo}:${sha}`;
   const pending = inflight.get(inflightKey);
   if (pending) {
     try {
@@ -247,7 +344,7 @@ app.post('/api/run', async (req, res) => {
   }
 
   const promise = (async (): Promise<CacheEntry> => {
-    const existing = getEntry(DEFAULT_OWNER, repo, sha);
+    const existing = getEntry(owner, repo, sha);
     if (existing) return existing;
 
     const port = await allocatePort();
@@ -255,12 +352,12 @@ app.post('/api/run', async (req, res) => {
 
     try {
       const [{ dir, pid, type }, commitInfo] = await Promise.all([
-        cloneAndStart(DEFAULT_OWNER, repo, sha, port, { envVars, startMode }),
-        getCommit(DEFAULT_OWNER, repo, sha).catch(() => ({ message: '', date: '' })),
+        cloneAndStart(owner, repo, sha, port, { envVars, startMode }),
+        getCommit(owner, repo, sha).catch(() => ({ message: '', date: '' })),
       ]);
       const entry: CacheEntry = {
-        id: makeId(DEFAULT_OWNER, repo, sha),
-        owner: DEFAULT_OWNER,
+        id: makeId(owner, repo, sha),
+        owner,
         repo,
         sha,
         port: type === 'static' ? 0 : port,
@@ -293,10 +390,12 @@ app.post('/api/run', async (req, res) => {
 
 app.post('/api/run-latest', async (req, res) => {
   const { envVars, startMode } = req.body;
+  let owner: string;
   let repo: string;
   let branch: string;
-  if (!req.body.repo || !req.body.branch) return res.status(400).json({ error: 'repo and branch required' });
+  if (!req.body.owner || !req.body.repo || !req.body.branch) return res.status(400).json({ error: 'owner, repo, and branch required' });
   try {
+    owner = validateOwner(req.body.owner);
     repo = validateRepo(req.body.repo);
     branch = validateBranch(req.body.branch);
   } catch (e) {
@@ -306,7 +405,7 @@ app.post('/api/run-latest', async (req, res) => {
   const webhookUrl = getWebhookCallbackUrl();
   if (!webhookUrl) return res.status(500).json({ error: 'webhook URL not configured' });
 
-  const inflightKey = `${repo}:${branch}`;
+  const inflightKey = `${owner}:${repo}:${branch}`;
   const pending = inflight.get(inflightKey);
   if (pending) {
     try {
@@ -318,10 +417,10 @@ app.post('/api/run-latest', async (req, res) => {
   }
 
   const promise = (async (): Promise<CacheEntry> => {
-    const sha = await getBranchHead(DEFAULT_OWNER, repo, branch);
+    const sha = await getBranchHead(owner, repo, branch);
 
     // Check if we already have a latest entry for this repo+branch
-    const existing = getLatestEntries().find(e => e.repo === repo && e.branch === branch);
+    const existing = getLatestEntries().find(e => e.owner === owner && e.repo === repo && e.branch === branch);
     if (existing) {
       existing.lastAccessed = Date.now();
       return existing;
@@ -333,12 +432,12 @@ app.post('/api/run-latest', async (req, res) => {
     let entry: CacheEntry;
     try {
       const [{ dir, pid, type }, commitInfo] = await Promise.all([
-        cloneAndStart(DEFAULT_OWNER, repo, sha, port, { branch, isLatest: true, envVars, startMode }),
-        getCommit(DEFAULT_OWNER, repo, sha).catch(() => ({ message: '', date: '' })),
+        cloneAndStart(owner, repo, sha, port, { branch, isLatest: true, envVars, startMode }),
+        getCommit(owner, repo, sha).catch(() => ({ message: '', date: '' })),
       ]);
       entry = {
-        id: makeId(DEFAULT_OWNER, repo, sha),
-        owner: DEFAULT_OWNER,
+        id: makeId(owner, repo, sha),
+        owner,
         repo, sha, port: type === 'static' ? 0 : port, dir, pid,
         lastAccessed: Date.now(),
         branch,
@@ -355,7 +454,7 @@ app.post('/api/run-latest', async (req, res) => {
     }
 
     // Auto-register webhook for this repo
-    registerWebhook(repo, webhookUrl);
+    registerWebhook(owner, repo, webhookUrl);
 
     return entry;
   })();
@@ -383,7 +482,7 @@ app.delete('/api/cache/:id', async (req, res) => {
   const ok = await removeEntry(req.params.id);
   // Clean up webhook if this was a latest entry
   if (ok && entry?.isLatest && entry.repo) {
-    unregisterWebhook(entry.repo).catch(() => {});
+    unregisterWebhook(entry.owner, entry.repo).catch(() => {});
   }
   res.json({ ok });
 });
@@ -505,6 +604,7 @@ app.post('/api/voice', upload.fields([{ name: 'audio', maxCount: 1 }, { name: 's
     try { consoleLogs = req.body.consoleLogs ? JSON.parse(req.body.consoleLogs) : undefined; }
     catch { return res.status(400).json({ error: 'invalid consoleLogs' }); }
     if (context?.repo) validateRepo(context.repo);
+    if (context?.owner) validateOwner(context.owner);
     if (context?.branch) validateBranch(context.branch);
     if (context?.sha) validateSha(context.sha);
   } catch (e) {
