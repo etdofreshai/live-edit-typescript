@@ -9,6 +9,8 @@ import { CommitList } from './components/CommitList';
 import { EnvModal } from './components/EnvModal';
 import { LogModal } from './components/LogModal';
 import { RepoSelector } from './components/RepoSelector';
+import { StaticFileBrowser } from './components/StaticFileBrowser';
+import { TopBar } from './components/TopBar';
 import { Branch, CacheEntry, Commit, Repo } from './types';
 
 type StartMode = 'vite' | 'npm-dev';
@@ -38,7 +40,6 @@ function savePersistedState(state: PersistedState) {
 }
 
 import { api } from './api';
-import { timeAgo } from './utils';
 
 interface EditorProps {
   initialOwner?: string;
@@ -555,48 +556,15 @@ export default function Editor({ initialOwner, initialRepo, initialBranch, initi
   return (
     <div className="app-container">
       {showHeader && (
-        <div className="top-bar">
-          <span className={`dot ${previewPort || activeEntry?.type === 'static' ? 'green' : 'gray'}`} />
-          {activeEntry ? (
-            <div className="top-bar-info">
-              <span className="tb-owner">
-                <a href="https://github.com/etdofreshai" target="_blank" rel="noopener noreferrer" style={{ color: '#6b7280', textDecoration: 'none' }}>etdofreshai</a>
-                <span style={{ color: '#555', margin: '0 2px' }}>/</span>
-              </span>
-              <span className="tb-repo">
-                <a href={`https://github.com/etdofreshai/${activeEntry.repo}`} target="_blank" rel="noopener noreferrer" style={{ color: '#cdd6f4', textDecoration: 'none' }}>etdofreshai/{activeEntry.repo}</a>
-              </span>
-              {activeEntry.branch && (
-                <span className="tb-branch">
-                  <span style={{ color: '#555', margin: '0 4px' }}>@</span>
-                  <a href={`https://github.com/etdofreshai/${activeEntry.repo}/tree/${activeEntry.branch}`} target="_blank" rel="noopener noreferrer" style={{ color: '#a6e3a1', textDecoration: 'none' }}>{activeEntry.branch}</a>
-                </span>
-              )}
-              <span className="tb-sha">
-                <span style={{ color: '#555', margin: '0 4px' }}>·</span>
-                <a href={`https://github.com/etdofreshai/${activeEntry.repo}/commit/${activeEntry.sha}`} target="_blank" rel="noopener noreferrer" style={{ color: '#89b4fa', fontFamily: 'monospace', textDecoration: 'none' }}>{activeEntry.sha.slice(0, 7)}</a>
-              </span>
-              {activeEntry.commitDate && (
-                <span className="tb-time" title={new Date(activeEntry.commitDate).toLocaleString()}>{timeAgo(activeEntry.commitDate)}</span>
-              )}
-              {activeEntry.commitMessage && (
-                <span className="tb-msg" style={{ color: '#cdd6f4' }}>{activeEntry.commitMessage.slice(0, 50)}{activeEntry.commitMessage.length > 50 ? '…' : ''}</span>
-              )}
-              <span className="tb-port" style={{ color: '#6b7280', marginLeft: 4 }}>
-                {previewPort ? `:${previewPort}` : activeEntry.type === 'static' ? 'static' : ''}
-              </span>
-            </div>
-          ) : <a href="/" style={{ color: 'inherit', textDecoration: 'none' }}>Live Edit TypeScript</a>}
-          <div className="top-bar-controls">
-            <button className="top-bar-btn" onClick={() => { if (activeEntry) { setSelectedRepo(activeEntry.repo); setShowEnvModal(true); } }} title="Environment variables">⚙️ Env</button>
-            <button className="top-bar-btn" onClick={async () => {
-              await refreshLog();
-              setShowLogModal(true);
-            }} title="Server log">📋 Log</button>
-            <button className="top-bar-btn" onClick={() => setSidebarOpen(o => !o)} title={sidebarOpen ? 'Hide sidebar' : 'Show sidebar'}>{sidebarOpen ? '✕' : '☰'}</button>
-            <button className="top-bar-btn" onClick={() => setShowHeader(false)} title="Hide top bar">▲</button>
-          </div>
-        </div>
+        <TopBar
+          activeEntry={activeEntry}
+          previewPort={previewPort}
+          sidebarOpen={sidebarOpen}
+          onShowEnvModal={() => { if (activeEntry) { setSelectedRepo(activeEntry.repo); setShowEnvModal(true); } }}
+          onShowLogModal={async () => { await refreshLog(); setShowLogModal(true); }}
+          onToggleSidebar={() => setSidebarOpen(o => !o)}
+          onHideHeader={() => setShowHeader(false)}
+        />
       )}
       {!showHeader && (
         <button
@@ -678,86 +646,15 @@ export default function Editor({ initialOwner, initialRepo, initialBranch, initi
             </div>
           )}
           {!previewPort && activeEntry?.type === 'static' ? (
-            <div style={{ display: 'flex', height: '100%' }}>
-              <div style={{ width: 260, borderRight: '1px solid #2a2a3e', overflow: 'auto', fontSize: 13, flexShrink: 0, background: '#1a1a2e' }}>
-                {(() => {
-                  const renderItems = (parentPath: string, depth: number): React.ReactNode[] => {
-                    const items = files
-                      .filter(p => {
-                        if (!parentPath) return !p.replace(/\/$/, '').includes('/');
-                        return p.startsWith(parentPath) && p !== parentPath &&
-                          !p.slice(parentPath.length).replace(/\/$/, '').includes('/');
-                      })
-                      .sort((a, b) => {
-                        const aD = a.endsWith('/'), bD = b.endsWith('/');
-                        if (aD !== bD) return aD ? -1 : 1;
-                        return a.localeCompare(b);
-                      });
-                    return items.map(item => {
-                      const isDir = item.endsWith('/');
-                      const expanded = expandedDirs.has(item);
-                      const name = item.replace(/\/$/, '').split('/').pop()!;
-                      const isSelected = currentFile?.path === item;
-                      return (
-                        <div key={item}>
-                          <div
-                            onClick={() => isDir
-                              ? setExpandedDirs(prev => { const n = new Set(prev); n.has(item) ? n.delete(item) : n.add(item); return n; })
-                              : viewFile(activeEntry!.id, item)
-                            }
-                            style={{
-                              padding: '3px 8px', paddingLeft: 8 + depth * 16, cursor: 'pointer',
-                              background: isSelected ? 'rgba(137, 180, 250, 0.15)' : 'transparent',
-                              color: isSelected ? '#89b4fa' : '#cdd6f4',
-                              whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
-                            }}
-                            onMouseEnter={e => { if (!isSelected) e.currentTarget.style.background = 'rgba(255,255,255,0.05)'; }}
-                            onMouseLeave={e => { if (!isSelected) e.currentTarget.style.background = 'transparent'; }}
-                          >
-                            <span style={{ marginRight: 4 }}>{isDir ? (expanded ? '📂' : '📁') : '📄'}</span>
-                            {name}
-                          </div>
-                          {isDir && expanded && renderItems(item, depth + 1)}
-                        </div>
-                      );
-                    });
-                  };
-                  return renderItems('', 0);
-                })()}
-                {filesTruncated && (
-                  <div style={{ padding: '4px 8px', fontSize: 11, color: '#f9e2af', borderTop: '1px solid #2a2a3e' }}>
-                    Results truncated — too many files
-                  </div>
-                )}
-              </div>
-              <div style={{ flex: 1, overflow: 'auto', display: 'flex', flexDirection: 'column', background: '#16161e' }}>
-                {currentFile ? (
-                  <>
-                    <div style={{ padding: '6px 12px', borderBottom: '1px solid #2a2a3e', fontSize: 12, color: '#8888aa', background: '#1a1a2e' }}>
-                      {currentFile.path.split('/').map((part, i, arr) => (
-                        <span key={i}>
-                          {i > 0 && <span style={{ margin: '0 2px', color: '#555' }}>/</span>}
-                          <span style={{ color: i === arr.length - 1 ? '#e0e0e0' : '#8888aa' }}>{part}</span>
-                        </span>
-                      ))}
-                    </div>
-                    {currentFile.binary ? (
-                      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', flex: 1, color: '#6b7280' }}>
-                        Binary file — cannot preview
-                      </div>
-                    ) : (
-                      <pre style={{ margin: 0, padding: 12, fontSize: 13, fontFamily: 'ui-monospace, monospace', overflow: 'auto', flex: 1, background: '#16161e', color: '#cdd6f4', lineHeight: 1.5 }}>
-                        {currentFile.content}
-                      </pre>
-                    )}
-                  </>
-                ) : (
-                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', flex: 1, color: '#6b7280' }}>
-                    Select a file to view
-                  </div>
-                )}
-              </div>
-            </div>
+            <StaticFileBrowser
+              cacheId={activeEntry.id}
+              files={files}
+              filesTruncated={filesTruncated}
+              currentFile={currentFile}
+              expandedDirs={expandedDirs}
+              onSetExpandedDirs={setExpandedDirs}
+              onViewFile={viewFile}
+            />
           ) : (
             <div className="preview-placeholder">
               Select a commit and click Run to preview
