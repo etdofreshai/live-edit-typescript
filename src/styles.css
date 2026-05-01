@@ -74,6 +74,10 @@ body {
 .top-bar-btn:hover { background: var(--bg-sidebar-hover); color: var(--text-primary); }
 .admin-token-btn.active { color: var(--accent-green); border-color: var(--accent-green-dim); }
 .admin-token-clear { padding-inline: 6px; color: var(--text-muted); }
+.top-bar-home-link {
+  color: inherit;
+  text-decoration: none;
+}
 
 /* Top bar info — progressive overflow hiding via container queries */
 .top-bar-info {
@@ -82,9 +86,30 @@ body {
   container-type: inline-size;
 }
 .top-bar-info > span { flex-shrink: 0; }
+.top-bar-info a { text-decoration: none; }
+.tb-owner-link { color: var(--text-muted); }
+.tb-repo-link,
+.tb-msg { color: var(--text-primary); }
+.tb-branch-link { color: var(--accent-green); }
+.tb-sha-link {
+  color: var(--accent);
+  font-family: 'SF Mono', 'Cascadia Code', 'Fira Code', monospace;
+}
+.tb-path-separator {
+  color: #555;
+  margin: 0 2px;
+}
+.tb-separator {
+  color: #555;
+  margin: 0 4px;
+}
 .tb-repo { flex-shrink: 1; overflow: hidden; text-overflow: ellipsis; min-width: 30px; }
 .tb-repo a { overflow: hidden; text-overflow: ellipsis; display: block; }
 .tb-msg { flex-shrink: 1; overflow: hidden; text-overflow: ellipsis; }
+.tb-port {
+  color: var(--text-muted);
+  margin-left: 4px;
+}
 
 /* Hide items based on container width (the info area, not viewport) */
 @container (max-width: 550px) { .tb-msg { display: none; } }
