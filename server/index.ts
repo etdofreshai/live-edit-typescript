@@ -4,6 +4,7 @@ import http from 'http';
 import httpProxy from 'http-proxy';
 import fs from 'fs';
 import pathModule from 'path';
+import { pathToFileURL } from 'url';
 import multer from 'multer';
 // Using native FormData + Blob (Node 22)
 import { listRepos, listBranches, listCommits, getBranchHead, getCommit, createBranch, getDefaultBranch, compareBranches, createPullRequest, DEFAULT_OWNER } from './github.js';
@@ -1022,22 +1023,28 @@ const shutdown = (signal: NodeJS.Signals) => {
 process.on('SIGTERM', shutdown);
 process.on('SIGINT', shutdown);
 
-const serverPort = getServerPort();
-server.listen(serverPort, () => {
-  console.log(`API server on :${serverPort}`);
+export function startServer() {
+  const serverPort = getServerPort();
+  server.listen(serverPort, () => {
+    console.log(`API server on :${serverPort}`);
 
-  // Poll latest entries every 10 seconds
-  setInterval(async () => {
-    for (const entry of getLatestEntries()) {
-      try {
-        const headSha = await getBranchHead(entry.owner, entry.repo, entry.branch!);
-        if (headSha !== entry.sha) {
-          console.log(`[latest] ${entry.repo}/${entry.branch}: ${entry.sha.slice(0, 7)} → ${headSha.slice(0, 7)}`);
-          await refreshLatestEntry(entry, headSha);
+    // Poll latest entries every 10 seconds
+    setInterval(async () => {
+      for (const entry of getLatestEntries()) {
+        try {
+          const headSha = await getBranchHead(entry.owner, entry.repo, entry.branch!);
+          if (headSha !== entry.sha) {
+            console.log(`[latest] ${entry.repo}/${entry.branch}: ${entry.sha.slice(0, 7)} → ${headSha.slice(0, 7)}`);
+            await refreshLatestEntry(entry, headSha);
+          }
+        } catch (e: unknown) {
+          console.error(`[latest] poll error for ${entry.repo}/${entry.branch}:`, errorMessage(e));
         }
-      } catch (e: unknown) {
-        console.error(`[latest] poll error for ${entry.repo}/${entry.branch}:`, errorMessage(e));
       }
-    }
-  }, 10_000);
-});
+    }, 10_000);
+  });
+}
+
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+  startServer();
+}
