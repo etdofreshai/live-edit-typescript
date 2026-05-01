@@ -28,6 +28,7 @@ let warnedDevWebhookUrl = false;
 const inflight = new Map<string, Promise<CacheEntry>>();
 const ADMIN_TOKEN = process.env.ADMIN_TOKEN;
 const requireAdmin = createRequireAdmin(ADMIN_TOKEN);
+const DEFAULT_SERVER_PORT = 3000;
 
 type ErrorLike = { message?: string };
 type WildcardParams = express.Request['params'] & { 0?: string };
@@ -79,6 +80,18 @@ function parseJsonObject(value: string | undefined): unknown {
   return value ? JSON.parse(value) : undefined;
 }
 
+export function getServerPort(env: NodeJS.ProcessEnv = process.env): number {
+  const rawPort = env.PORT;
+  if (rawPort === undefined || rawPort === '') return DEFAULT_SERVER_PORT;
+
+  const port = Number(rawPort);
+  if (!Number.isInteger(port) || port < 1 || port > 65535) {
+    throw new Error(`invalid PORT: expected an integer from 1 to 65535, got ${JSON.stringify(rawPort)}`);
+  }
+
+  return port;
+}
+
 function isVoiceContext(value: unknown): value is VoiceContext {
   return typeof value === 'object' && value !== null;
 }
@@ -121,7 +134,7 @@ function getWebhookCallbackUrl(): string | null {
     warnedDevWebhookUrl = true;
   }
 
-  const port = process.env.PORT || '3000';
+  const port = getServerPort();
   return `http://localhost:${port}/api/webhook`;
 }
 
@@ -1009,8 +1022,9 @@ const shutdown = (signal: NodeJS.Signals) => {
 process.on('SIGTERM', shutdown);
 process.on('SIGINT', shutdown);
 
-server.listen(3000, () => {
-  console.log('API server on :3000');
+const serverPort = getServerPort();
+server.listen(serverPort, () => {
+  console.log(`API server on :${serverPort}`);
 
   // Poll latest entries every 10 seconds
   setInterval(async () => {
