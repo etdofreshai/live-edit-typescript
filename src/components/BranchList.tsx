@@ -1,3 +1,4 @@
+import { useCallback } from 'react';
 import { Branch } from '../types';
 
 interface BranchListProps {
@@ -29,6 +30,29 @@ export function BranchList({
   onSetBranchError,
   onCreateBranch,
 }: BranchListProps) {
+  const handleFork = useCallback((branchName: string) => {
+    onSetBranchFrom(branchFrom === branchName ? null : branchName);
+    onSetNewBranchName(`${branchName}-dev-${crypto.randomUUID().slice(0, 6)}`);
+    onSetBranchError('');
+  }, [branchFrom, onSetBranchFrom, onSetNewBranchName, onSetBranchError]);
+
+  const handleCreate = useCallback((fromBranch: string) => {
+    const trimmed = newBranchName.trim();
+    if (trimmed) onCreateBranch(fromBranch, trimmed);
+  }, [newBranchName, onCreateBranch]);
+
+  const handleInputKeyDown = useCallback((e: React.KeyboardEvent, branchName: string) => {
+    if (e.key === 'Enter') handleCreate(branchName);
+    if (e.key === 'Escape') onSetBranchFrom(null);
+  }, [handleCreate, onSetBranchFrom]);
+
+  const handleRowKeyDown = useCallback((e: React.KeyboardEvent, branchName: string) => {
+    if (e.key === 'Enter' || e.key === ' ') {
+      e.preventDefault();
+      onSelectBranch(branchName);
+    }
+  }, [onSelectBranch]);
+
   if (branches.length === 0) return null;
 
   return (
@@ -39,45 +63,50 @@ export function BranchList({
           {branches.map((b) => (
             <div key={b.name}>
               <div
-                className={`list-item ${b.name === selectedBranch ? 'active' : ''}`}
-                style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}
-                onClick={() => onSelectBranch(b.name)}>
-                <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{b.name}</span>
-                <div style={{ display: 'flex', gap: 2, flexShrink: 0 }}>
+                className={`list-item branch-row ${b.name === selectedBranch ? 'active' : ''}`}
+                role="button"
+                tabIndex={0}
+                onClick={() => onSelectBranch(b.name)}
+                onKeyDown={(e) => handleRowKeyDown(e, b.name)}>
+                <span className="branch-name">{b.name}</span>
+                <div className="branch-actions">
                   <a
                     href={`https://github.com/${owner}/${selectedRepo}/tree/${b.name}`}
                     target="_blank"
                     rel="noopener noreferrer"
-                    onClick={e => e.stopPropagation()}
-                    style={{ color: '#6b7280', fontSize: 11, textDecoration: 'none', padding: '0 4px' }}
+                    onClick={(e) => e.stopPropagation()}
+                    className="branch-link"
+                    aria-label={`View ${b.name} on GitHub`}
                     title="View on GitHub"
                   >↗</a>
                   <button
-                    onClick={(e) => { e.stopPropagation(); onSetBranchFrom(branchFrom === b.name ? null : b.name); onSetNewBranchName(`${b.name}-dev-${crypto.randomUUID().slice(0, 6)}`); onSetBranchError(''); }}
-                    style={{ background: 'none', border: 'none', color: '#6b7280', cursor: 'pointer', fontSize: 14, padding: '0 4px', flexShrink: 0, lineHeight: 1 }}
+                    onClick={(e) => { e.stopPropagation(); handleFork(b.name); }}
+                    className="branch-fork-btn"
+                    aria-label={`Create branch from ${b.name}`}
                     title="Create branch from here"
                   >⑂</button>
                 </div>
               </div>
               {branchFrom === b.name && (
-                <div style={{ padding: '4px 8px 8px', display: 'flex', gap: 4, alignItems: 'center' }}>
+                <div className="branch-form">
                   <input
                     autoFocus
                     value={newBranchName}
-                    onChange={e => onSetNewBranchName(e.target.value)}
-                    onKeyDown={e => { if (e.key === 'Enter' && newBranchName.trim()) onCreateBranch(b.name, newBranchName.trim()); if (e.key === 'Escape') onSetBranchFrom(null); }}
+                    onChange={(e) => onSetNewBranchName(e.target.value)}
+                    onKeyDown={(e) => handleInputKeyDown(e, b.name)}
                     placeholder="new-branch-name"
-                    style={{ flex: 1, background: '#1a1a2e', border: '1px solid #3a3a5e', borderRadius: 4, color: '#cdd6f4', padding: '3px 6px', fontSize: 12, outline: 'none', minWidth: 0 }}
-                    onClick={e => e.stopPropagation()}
+                    className="branch-form-input"
+                    onClick={(e) => e.stopPropagation()}
+                    aria-label="New branch name"
                   />
                   <button
-                    onClick={(e) => { e.stopPropagation(); if (newBranchName.trim()) onCreateBranch(b.name, newBranchName.trim()); }}
-                    style={{ background: '#a6e3a1', color: '#1a1a2e', border: 'none', borderRadius: 4, padding: '3px 8px', fontSize: 12, cursor: 'pointer', fontWeight: 600, flexShrink: 0 }}
+                    onClick={(e) => { e.stopPropagation(); handleCreate(b.name); }}
+                    className="branch-form-btn"
                   >Create</button>
                 </div>
               )}
               {branchFrom === b.name && branchError && (
-                <div style={{ padding: '0 8px 6px', color: '#f38ba8', fontSize: 11 }}>{branchError}</div>
+                <div className="branch-error">{branchError}</div>
               )}
             </div>
           ))}
