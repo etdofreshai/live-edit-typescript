@@ -6,7 +6,7 @@ import fs from 'fs';
 import pathModule from 'path';
 import multer from 'multer';
 // Using native FormData + Blob (Node 22)
-import { listRepos, listBranches, listCommits, getBranchHead, getCommit, createBranch, getDefaultBranch, compareBranches, createPullRequest, OWNER } from './github.js';
+import { listRepos, listBranches, listCommits, getBranchHead, getCommit, createBranch, getDefaultBranch, compareBranches, createPullRequest, DEFAULT_OWNER } from './github.js';
 import { getEntry, addEntry, allocatePort, releasePort, removeEntry, listEntries, makeId, getEntryByPort, getLatestEntries, updateEntry, getEntryById } from './cache-manager.js';
 import { cloneAndStart, pullLatest, getServerLog, stopServer } from './runner.js';
 import { webhookRouter, registerWebhook, unregisterWebhook } from './webhook.js';
@@ -84,7 +84,7 @@ async function refreshLatestEntry(entry: CacheEntry, headSha: string) {
 
   try {
     await stopServer(entry);
-    const { dir, pid, type } = await cloneAndStart(entry.repo, headSha, port, {
+    const { dir, pid, type } = await cloneAndStart(entry.owner, entry.repo, headSha, port, {
       branch: entry.branch,
       isLatest: true,
     });
@@ -92,7 +92,7 @@ async function refreshLatestEntry(entry: CacheEntry, headSha: string) {
     await removeEntry(oldId);
     await addEntry({
       ...entry,
-      id: makeId(entry.repo, headSha),
+      id: makeId(entry.owner, entry.repo, headSha),
       sha: headSha,
       port: type === 'static' ? 0 : port,
       dir,
@@ -112,7 +112,7 @@ const gitInfo = (() => {
     const sha = execFileSync('git', ['rev-parse', 'HEAD'], { encoding: 'utf8' }).trim();
     const branch = execFileSync('git', ['rev-parse', '--abbrev-ref', 'HEAD'], { encoding: 'utf8' }).trim();
     const date = execFileSync('git', ['log', '-1', '--format=%aI'], { encoding: 'utf8' }).trim();
-    return { owner: OWNER, repo: 'live-edit-typescript', branch, sha, date };
+    return { owner: DEFAULT_OWNER, repo: 'live-edit-typescript', branch, sha, date };
   } catch { return null; }
 })();
 app.get('/api/info', (_req, res) => res.json(gitInfo));
@@ -153,7 +153,7 @@ app.get('/api/repos', async (_req, res) => {
 app.get('/api/repos/:repo/branches', async (req, res) => {
   try {
     const repo = validateRepo(req.params.repo);
-    res.json(await listBranches(repo));
+    res.json(await listBranches(DEFAULT_OWNER, repo));
   } catch (e: any) {
     if (e.message?.startsWith('invalid ')) return res.status(400).json({ error: validationMessage(e) });
     res.status(500).json({ error: e.message });
@@ -167,8 +167,8 @@ app.post('/api/repos/:repo/branches', async (req, res) => {
     const repo = validateRepo(req.params.repo);
     const branchName = validateBranch(name);
     const fromBranch = validateBranch(from);
-    const sha = await getBranchHead(repo, fromBranch);
-    const ref = await createBranch(repo, branchName, sha);
+    const sha = await getBranchHead(DEFAULT_OWNER, repo, fromBranch);
+    const ref = await createBranch(DEFAULT_OWNER, repo, branchName, sha);
     res.json({ name, sha, ref: ref.ref });
   } catch (e: any) {
     if (e.message?.startsWith('invalid ')) return res.status(400).json({ error: validationMessage(e) });
@@ -181,11 +181,11 @@ app.get('/api/repos/:repo/branches/:branch/compare', async (req, res) => {
   try {
     const repo = validateRepo(req.params.repo);
     const branch = validateBranch(req.params.branch);
-    const defaultBranch = await getDefaultBranch(repo);
+    const defaultBranch = await getDefaultBranch(DEFAULT_OWNER, repo);
     if (branch === defaultBranch) {
       return res.json({ ahead: 0, behind: 0, defaultBranch });
     }
-    const cmp = await compareBranches(repo, defaultBranch, branch);
+    const cmp = await compareBranches(DEFAULT_OWNER, repo, defaultBranch, branch);
     res.json({ ahead: cmp.ahead_by, behind: cmp.behind_by, defaultBranch });
   } catch (e: any) {
     if (e.message?.startsWith('invalid ')) return res.status(400).json({ error: validationMessage(e) });
@@ -200,7 +200,7 @@ app.post('/api/repos/:repo/pulls', async (req, res) => {
     const repo = validateRepo(req.params.repo);
     const headBranch = validateBranch(head);
     const baseBranch = validateBranch(base);
-    const pr = await createPullRequest(repo, title, headBranch, baseBranch, body);
+    const pr = await createPullRequest(DEFAULT_OWNER, repo, title, headBranch, baseBranch, body);
     res.json({ url: pr.html_url, number: pr.number });
   } catch (e: any) {
     if (e.message?.startsWith('invalid ')) return res.status(400).json({ error: validationMessage(e) });
@@ -212,7 +212,7 @@ app.get('/api/repos/:repo/branches/:branch/commits', async (req, res) => {
   try {
     const repo = validateRepo(req.params.repo);
     const branch = validateBranch(req.params.branch);
-    res.json(await listCommits(repo, branch));
+    res.json(await listCommits(DEFAULT_OWNER, repo, branch));
   } catch (e: any) {
     if (e.message?.startsWith('invalid ')) return res.status(400).json({ error: validationMessage(e) });
     res.status(500).json({ error: e.message });
@@ -247,7 +247,7 @@ app.post('/api/run', async (req, res) => {
   }
 
   const promise = (async (): Promise<CacheEntry> => {
-    const existing = getEntry(repo, sha);
+    const existing = getEntry(DEFAULT_OWNER, repo, sha);
     if (existing) return existing;
 
     const port = await allocatePort();
@@ -255,11 +255,12 @@ app.post('/api/run', async (req, res) => {
 
     try {
       const [{ dir, pid, type }, commitInfo] = await Promise.all([
-        cloneAndStart(repo, sha, port, { envVars, startMode }),
-        getCommit(repo, sha).catch(() => ({ message: '', date: '' })),
+        cloneAndStart(DEFAULT_OWNER, repo, sha, port, { envVars, startMode }),
+        getCommit(DEFAULT_OWNER, repo, sha).catch(() => ({ message: '', date: '' })),
       ]);
       const entry: CacheEntry = {
-        id: makeId(repo, sha),
+        id: makeId(DEFAULT_OWNER, repo, sha),
+        owner: DEFAULT_OWNER,
         repo,
         sha,
         port: type === 'static' ? 0 : port,
@@ -317,7 +318,7 @@ app.post('/api/run-latest', async (req, res) => {
   }
 
   const promise = (async (): Promise<CacheEntry> => {
-    const sha = await getBranchHead(repo, branch);
+    const sha = await getBranchHead(DEFAULT_OWNER, repo, branch);
 
     // Check if we already have a latest entry for this repo+branch
     const existing = getLatestEntries().find(e => e.repo === repo && e.branch === branch);
@@ -332,11 +333,12 @@ app.post('/api/run-latest', async (req, res) => {
     let entry: CacheEntry;
     try {
       const [{ dir, pid, type }, commitInfo] = await Promise.all([
-        cloneAndStart(repo, sha, port, { branch, isLatest: true, envVars, startMode }),
-        getCommit(repo, sha).catch(() => ({ message: '', date: '' })),
+        cloneAndStart(DEFAULT_OWNER, repo, sha, port, { branch, isLatest: true, envVars, startMode }),
+        getCommit(DEFAULT_OWNER, repo, sha).catch(() => ({ message: '', date: '' })),
       ]);
       entry = {
-        id: makeId(repo, sha),
+        id: makeId(DEFAULT_OWNER, repo, sha),
+        owner: DEFAULT_OWNER,
         repo, sha, port: type === 'static' ? 0 : port, dir, pid,
         lastAccessed: Date.now(),
         branch,
@@ -818,7 +820,7 @@ server.listen(3000, () => {
   setInterval(async () => {
     for (const entry of getLatestEntries()) {
       try {
-        const headSha = await getBranchHead(entry.repo, entry.branch!);
+        const headSha = await getBranchHead(entry.owner, entry.repo, entry.branch!);
         if (headSha !== entry.sha) {
           console.log(`[latest] ${entry.repo}/${entry.branch}: ${entry.sha.slice(0, 7)} → ${headSha.slice(0, 7)}`);
           await refreshLatestEntry(entry, headSha);
