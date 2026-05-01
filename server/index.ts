@@ -4,6 +4,7 @@ import http from 'http';
 import httpProxy from 'http-proxy';
 import fs from 'fs';
 import pathModule from 'path';
+import { pathToFileURL } from 'url';
 import multer from 'multer';
 // Using native FormData + Blob (Node 22)
 import { listRepos, listBranches, listCommits, getBranchHead, getCommit, createBranch, getDefaultBranch, compareBranches, createPullRequest, DEFAULT_OWNER } from './github.js';
@@ -85,6 +86,22 @@ function isVoiceContext(value: unknown): value is VoiceContext {
 
 function isStringArray(value: unknown): value is string[] {
   return Array.isArray(value) && value.every(item => typeof item === 'string');
+}
+
+export function getServerPort(
+  env: { PORT?: string } = process.env,
+  warn: (message: string) => void = () => {}
+): number {
+  const rawPort = env.PORT;
+  if (rawPort === undefined || rawPort === '') return 3000;
+
+  const port = Number(rawPort);
+  if (!Number.isInteger(port) || port < 1 || port > 65535) {
+    warn(`[server] invalid PORT "${rawPort}"; falling back to 3000`);
+    return 3000;
+  }
+
+  return port;
 }
 
 function toGatewayResponseBody(value: unknown): GatewayResponseBody | null {
@@ -1009,21 +1026,29 @@ const shutdown = (signal: NodeJS.Signals) => {
 process.on('SIGTERM', shutdown);
 process.on('SIGINT', shutdown);
 
-server.listen(3000, () => {
-  console.log('API server on :3000');
+function startServer() {
+  const port = getServerPort(process.env, message => console.warn(message));
 
-  // Poll latest entries every 10 seconds
-  setInterval(async () => {
-    for (const entry of getLatestEntries()) {
-      try {
-        const headSha = await getBranchHead(entry.owner, entry.repo, entry.branch!);
-        if (headSha !== entry.sha) {
-          console.log(`[latest] ${entry.repo}/${entry.branch}: ${entry.sha.slice(0, 7)} → ${headSha.slice(0, 7)}`);
-          await refreshLatestEntry(entry, headSha);
+  server.listen(port, () => {
+    console.log(`API server on :${port}`);
+
+    // Poll latest entries every 10 seconds
+    setInterval(async () => {
+      for (const entry of getLatestEntries()) {
+        try {
+          const headSha = await getBranchHead(entry.owner, entry.repo, entry.branch!);
+          if (headSha !== entry.sha) {
+            console.log(`[latest] ${entry.repo}/${entry.branch}: ${entry.sha.slice(0, 7)} → ${headSha.slice(0, 7)}`);
+            await refreshLatestEntry(entry, headSha);
+          }
+        } catch (e: unknown) {
+          console.error(`[latest] poll error for ${entry.repo}/${entry.branch}:`, errorMessage(e));
         }
-      } catch (e: unknown) {
-        console.error(`[latest] poll error for ${entry.repo}/${entry.branch}:`, errorMessage(e));
       }
-    }
-  }, 10_000);
-});
+    }, 10_000);
+  });
+}
+
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+  startServer();
+}
