@@ -20,6 +20,7 @@ app.use(cors());
 
 const packageInfo = JSON.parse(fs.readFileSync(pathModule.join(process.cwd(), 'package.json'), 'utf-8')) as { version?: string };
 const version = packageInfo.version || '0.0.0';
+let warnedDevWebhookUrl = false;
 
 function validationMessage(e: unknown): string {
   const message = e instanceof Error ? e.message : '';
@@ -34,6 +35,19 @@ function isInsideDir(absPath: string, dir: string): boolean {
   const resolved = pathModule.resolve(absPath);
   const root = pathModule.resolve(dir);
   return resolved === root || resolved.startsWith(root + pathModule.sep);
+}
+
+function getWebhookCallbackUrl(): string | null {
+  if (process.env.WEBHOOK_URL) return process.env.WEBHOOK_URL;
+  if (process.env.NODE_ENV === 'production') return null;
+
+  if (!warnedDevWebhookUrl) {
+    console.warn('[webhook] WEBHOOK_URL is not configured; using localhost callback URL for development');
+    warnedDevWebhookUrl = true;
+  }
+
+  const port = process.env.PORT || '3000';
+  return `http://localhost:${port}/api/webhook`;
 }
 
 // Git info for footer
@@ -207,6 +221,9 @@ app.post('/api/run-latest', async (req, res) => {
     return res.status(400).json({ error: validationMessage(e) });
   }
 
+  const webhookUrl = getWebhookCallbackUrl();
+  if (!webhookUrl) return res.status(500).json({ error: 'webhook URL not configured' });
+
   try {
     const sha = await getBranchHead(repo, branch);
 
@@ -238,7 +255,7 @@ app.post('/api/run-latest', async (req, res) => {
     addEntry(entry);
 
     // Auto-register webhook for this repo
-    registerWebhook(repo, req.get('host'));
+    registerWebhook(repo, webhookUrl);
 
     res.json(entry);
   } catch (e: any) {

@@ -81,7 +81,7 @@ webhookRouter.post('/api/webhook', raw({ type: 'application/json' }), async (req
 });
 
 // Auto-register webhook on a GitHub repo
-export async function registerWebhook(repo: string, requestHost?: string): Promise<void> {
+export async function registerWebhook(repo: string, webhookUrl: string): Promise<void> {
   if (!TOKEN) {
     console.warn('[webhook] No GITHUB_TOKEN, skipping webhook registration');
     return;
@@ -91,9 +91,8 @@ export async function registerWebhook(repo: string, requestHost?: string): Promi
     return;
   }
 
-  const webhookUrl = process.env.WEBHOOK_URL || (requestHost ? `https://${requestHost}/api/webhook` : null);
   if (!webhookUrl) {
-    console.warn('[webhook] No WEBHOOK_URL and no host header, skipping registration');
+    console.warn('[webhook] No WEBHOOK_URL, skipping registration');
     return;
   }
 
