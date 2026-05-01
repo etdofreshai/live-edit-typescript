@@ -17,7 +17,7 @@ if (!configuredWebhookSecret) {
   }
 }
 
-function verifySignature(payload: Buffer, signature: string | undefined): boolean {
+export function verifySignature(payload: Buffer, signature: string | undefined): boolean {
   if (!WEBHOOK_SECRET || !signature?.startsWith('sha256=')) return false;
 
   const actualSig = signature.slice('sha256='.length);
