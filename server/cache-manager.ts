@@ -1,4 +1,5 @@
 import { stopServer, removeFiles } from './runner.js';
+import { safeTargetSubdir } from './path-safety.js';
 
 export interface CacheEntry {
   id: string;
@@ -22,7 +23,7 @@ const PORT_MAX = 5189;
 const cache = new Map<string, CacheEntry>();
 
 function makeId(repo: string, sha: string) {
-  return `${repo}-${sha.slice(0, 7)}`;
+  return safeTargetSubdir(repo, sha).split(/[\\/]/).pop()!;
 }
 
 function usedPorts(): Set<number> {
