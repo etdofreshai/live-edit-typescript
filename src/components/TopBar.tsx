@@ -1,3 +1,5 @@
+import { useState } from 'react';
+import { clearAdminToken, getAdminToken, setAdminToken } from '../api';
 import { CacheEntry } from '../types';
 import { timeAgo } from '../utils';
 
@@ -20,6 +22,20 @@ export function TopBar({
   onToggleSidebar,
   onHideHeader,
 }: TopBarProps) {
+  const [adminToken, setAdminTokenValue] = useState(getAdminToken);
+
+  const saveToken = () => {
+    const next = window.prompt('Admin token', adminToken);
+    if (next === null) return;
+    setAdminToken(next);
+    setAdminTokenValue(getAdminToken());
+  };
+
+  const removeToken = () => {
+    clearAdminToken();
+    setAdminTokenValue('');
+  };
+
   return (
     <div className="top-bar">
       <span className={`dot ${previewPort || activeEntry?.type === 'static' ? 'green' : 'gray'}`} />
@@ -54,6 +70,8 @@ export function TopBar({
         </div>
       ) : <a href="/" style={{ color: 'inherit', textDecoration: 'none' }}>Live Edit TypeScript</a>}
       <div className="top-bar-controls">
+        <button className={`top-bar-btn admin-token-btn ${adminToken ? 'active' : ''}`} onClick={saveToken} title={adminToken ? 'Admin token set for this tab' : 'Set admin token'}>🔑</button>
+        {adminToken && <button className="top-bar-btn admin-token-clear" onClick={removeToken} title="Clear admin token">Clear</button>}
         <button className="top-bar-btn" onClick={onShowEnvModal} title="Environment variables">⚙️ Env</button>
         <button className="top-bar-btn" onClick={onShowLogModal} title="Server log">📋 Log</button>
         <button className="top-bar-btn" onClick={onToggleSidebar} title={sidebarOpen ? 'Hide sidebar' : 'Show sidebar'}>{sidebarOpen ? '✕' : '☰'}</button>
