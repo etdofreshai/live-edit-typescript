@@ -1,8 +1,9 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { isSameOriginApiRequest, setAdminToken, withAdminToken } from '../src/api.js';
+import { ApiError, api, isSameOriginApiRequest, setAdminToken, withAdminToken } from '../src/api.js';
 
 const originalWindow = globalThis.window;
 const originalSessionStorage = globalThis.sessionStorage;
+const originalFetch = globalThis.fetch;
 
 function createStorage(): Storage {
   const values = new Map<string, string>();
@@ -61,6 +62,10 @@ describe('withAdminToken', () => {
       configurable: true,
       value: originalSessionStorage,
     });
+    Object.defineProperty(globalThis, 'fetch', {
+      configurable: true,
+      value: originalFetch,
+    });
   });
 
   it('does not add an auth header when no admin token is set', () => {
@@ -85,5 +90,82 @@ describe('withAdminToken', () => {
 
     expect(new Headers(assetOpts.headers).has('Authorization')).toBe(false);
     expect(new Headers(externalOpts.headers).has('Authorization')).toBe(false);
+  });
+
+  it('preserves existing headers when adding the bearer token', () => {
+    setAdminToken('secret');
+
+    const opts = withAdminToken('/api/cache', {
+      headers: {
+        Accept: 'application/json',
+        'X-Trace-Id': 'trace-1',
+      },
+    });
+    const headers = new Headers(opts.headers);
+
+    expect(headers.get('Accept')).toBe('application/json');
+    expect(headers.get('X-Trace-Id')).toBe('trace-1');
+    expect(headers.get('Authorization')).toBe('Bearer secret');
+  });
+
+  it('does not overwrite an existing authorization header', () => {
+    setAdminToken('secret');
+
+    const opts = withAdminToken('/api/cache', {
+      headers: { Authorization: 'Bearer caller-token' },
+    });
+
+    expect(new Headers(opts.headers).get('Authorization')).toBe('Bearer caller-token');
+  });
+
+  it('does not add authorization when an admin token header already exists', () => {
+    setAdminToken('secret');
+
+    const opts = withAdminToken('/api/cache', {
+      headers: { 'x-admin-token': 'caller-token' },
+    });
+    const headers = new Headers(opts.headers);
+
+    expect(headers.get('x-admin-token')).toBe('caller-token');
+    expect(headers.has('Authorization')).toBe(false);
+  });
+});
+
+describe('api', () => {
+  afterEach(() => {
+    Object.defineProperty(globalThis, 'fetch', {
+      configurable: true,
+      value: originalFetch,
+    });
+  });
+
+  it('throws an ApiError with the response error message', async () => {
+    Object.defineProperty(globalThis, 'fetch', {
+      configurable: true,
+      value: async () =>
+        new Response(JSON.stringify({ error: 'Cache write failed' }), {
+          status: 500,
+          headers: { 'Content-Type': 'application/json' },
+        }),
+    });
+
+    await expect(api('/api/cache')).rejects.toMatchObject({
+      name: 'ApiError',
+      status: 500,
+      message: 'Cache write failed',
+    });
+    await expect(api('/api/cache')).rejects.toBeInstanceOf(ApiError);
+  });
+
+  it('throws an ApiError with an HTTP status fallback for non-JSON errors', async () => {
+    Object.defineProperty(globalThis, 'fetch', {
+      configurable: true,
+      value: async () => new Response('unavailable', { status: 503 }),
+    });
+
+    await expect(api('/api/cache')).rejects.toMatchObject({
+      status: 503,
+      message: 'HTTP 503',
+    });
   });
 });
