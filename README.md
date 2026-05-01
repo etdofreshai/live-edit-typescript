@@ -347,3 +347,12 @@ CMD ["npm", "run", "dev"]
 ```
 
 No `EXPOSE` needed if your hosting platform handles port forwarding (e.g., Dokploy → port 5173).
+
+### AFK Cleanup
+
+Automated runs leave behind worktrees, branches, and stashes. See [`docs/afk-cleanup.md`](docs/afk-cleanup.md) for the full guide, or run the helper script (lists artifacts by default, does not delete anything):
+
+```bash
+./scripts/afk-cleanup.sh          # dry-run — lists only
+./scripts/afk-cleanup.sh --merged # show branches safe to delete
+```
