@@ -5,6 +5,13 @@ export function validateRepo(name: string): string {
   return name;
 }
 
+export function validateOwner(owner: string): string {
+  if (typeof owner !== 'string' || !/^[A-Za-z0-9](?:[A-Za-z0-9-]{0,37}[A-Za-z0-9])?$/.test(owner)) {
+    throw new Error('invalid owner: ' + owner);
+  }
+  return owner;
+}
+
 export function validateSha(sha: string): string {
   if (typeof sha !== 'string' || !/^[0-9a-f]{7,40}$/i.test(sha)) {
     throw new Error('invalid sha: ' + sha);

@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { validateRepo, validateSha, validateBranch } from '../server/validators.js';
+import { validateRepo, validateSha, validateBranch, validateOwner } from '../server/validators.js';
 
 describe('validateRepo', () => {
   it('accepts a simple alphanumeric repo', () => {
@@ -41,6 +41,50 @@ describe('validateRepo', () => {
 
   it('rejects non-string input', () => {
     expect(() => validateRepo(42 as any)).toThrow('invalid repo');
+  });
+});
+
+describe('validateOwner', () => {
+  it('accepts a simple alphanumeric owner', () => {
+    expect(validateOwner('octocat')).toBe('octocat');
+  });
+
+  it('accepts hyphens in the middle', () => {
+    expect(validateOwner('github-user')).toBe('github-user');
+  });
+
+  it('accepts owner at min length 1', () => {
+    expect(validateOwner('a')).toBe('a');
+  });
+
+  it('accepts owner at max length 39', () => {
+    const owner = 'a'.repeat(39);
+    expect(validateOwner(owner)).toBe(owner);
+  });
+
+  it('rejects empty owner', () => {
+    expect(() => validateOwner('')).toThrow('invalid owner');
+  });
+
+  it('rejects owner exceeding 39 chars', () => {
+    expect(() => validateOwner('a'.repeat(40))).toThrow('invalid owner');
+  });
+
+  it('rejects leading hyphen', () => {
+    expect(() => validateOwner('-octocat')).toThrow('invalid owner');
+  });
+
+  it('rejects trailing hyphen', () => {
+    expect(() => validateOwner('octocat-')).toThrow('invalid owner');
+  });
+
+  it('rejects underscores and dots', () => {
+    expect(() => validateOwner('octo_cat')).toThrow('invalid owner');
+    expect(() => validateOwner('octo.cat')).toThrow('invalid owner');
+  });
+
+  it('rejects non-string input', () => {
+    expect(() => validateOwner(null as any)).toThrow('invalid owner');
   });
 });
 
