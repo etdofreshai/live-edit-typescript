@@ -26,21 +26,21 @@ export function TopBar({
       {activeEntry ? (
         <div className="top-bar-info">
           <span className="tb-owner">
-            <a href="https://github.com/etdofreshai" target="_blank" rel="noopener noreferrer" style={{ color: '#6b7280', textDecoration: 'none' }}>etdofreshai</a>
+            <a href={`https://github.com/${activeEntry.owner}`} target="_blank" rel="noopener noreferrer" style={{ color: '#6b7280', textDecoration: 'none' }}>{activeEntry.owner}</a>
             <span style={{ color: '#555', margin: '0 2px' }}>/</span>
           </span>
           <span className="tb-repo">
-            <a href={`https://github.com/etdofreshai/${activeEntry.repo}`} target="_blank" rel="noopener noreferrer" style={{ color: '#cdd6f4', textDecoration: 'none' }}>etdofreshai/{activeEntry.repo}</a>
+            <a href={`https://github.com/${activeEntry.owner}/${activeEntry.repo}`} target="_blank" rel="noopener noreferrer" style={{ color: '#cdd6f4', textDecoration: 'none' }}>{activeEntry.repo}</a>
           </span>
           {activeEntry.branch && (
             <span className="tb-branch">
               <span style={{ color: '#555', margin: '0 4px' }}>@</span>
-              <a href={`https://github.com/etdofreshai/${activeEntry.repo}/tree/${activeEntry.branch}`} target="_blank" rel="noopener noreferrer" style={{ color: '#a6e3a1', textDecoration: 'none' }}>{activeEntry.branch}</a>
+              <a href={`https://github.com/${activeEntry.owner}/${activeEntry.repo}/tree/${activeEntry.branch}`} target="_blank" rel="noopener noreferrer" style={{ color: '#a6e3a1', textDecoration: 'none' }}>{activeEntry.branch}</a>
             </span>
           )}
           <span className="tb-sha">
             <span style={{ color: '#555', margin: '0 4px' }}>·</span>
-            <a href={`https://github.com/etdofreshai/${activeEntry.repo}/commit/${activeEntry.sha}`} target="_blank" rel="noopener noreferrer" style={{ color: '#89b4fa', fontFamily: 'monospace', textDecoration: 'none' }}>{activeEntry.sha.slice(0, 7)}</a>
+            <a href={`https://github.com/${activeEntry.owner}/${activeEntry.repo}/commit/${activeEntry.sha}`} target="_blank" rel="noopener noreferrer" style={{ color: '#89b4fa', fontFamily: 'monospace', textDecoration: 'none' }}>{activeEntry.sha.slice(0, 7)}</a>
           </span>
           {activeEntry.commitDate && (
             <span className="tb-time" title={new Date(activeEntry.commitDate).toLocaleString()}>{timeAgo(activeEntry.commitDate)}</span>

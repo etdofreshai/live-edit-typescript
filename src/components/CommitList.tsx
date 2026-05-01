@@ -4,6 +4,7 @@ import { timeAgo } from '../utils';
 type StartMode = 'vite' | 'npm-dev';
 
 interface CommitListProps {
+  owner: string;
   commits: Commit[];
   selectedRepo: string;
   selectedBranch: string;
@@ -21,6 +22,7 @@ interface CommitListProps {
 }
 
 export function CommitList({
+  owner,
   commits,
   selectedRepo,
   selectedBranch,
@@ -97,7 +99,7 @@ export function CommitList({
                 <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
                   <div className="commit-sha">{c.sha.slice(0, 7)}</div>
                   <a
-                    href={`https://github.com/etdofreshai/${selectedRepo}/commit/${c.sha}`}
+                    href={`https://github.com/${owner}/${selectedRepo}/commit/${c.sha}`}
                     target="_blank"
                     rel="noopener noreferrer"
                     style={{ color: '#6b7280', fontSize: 10, textDecoration: 'none' }}

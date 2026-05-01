@@ -6,9 +6,11 @@ import { CacheEntry } from './types';
 import { api } from './api';
 import { IframeWithRetry } from './IframeWithRetry';
 
+const DEFAULT_OWNER = 'etdofreshai';
+
 export default function PreviewPage() {
   const { owner, repo, branch, commit } = useParams<{
-    owner: string;
+    owner?: string;
     repo: string;
     branch?: string;
     commit?: string;
@@ -20,7 +22,8 @@ export default function PreviewPage() {
 
   useEffect(() => {
     const loadPreview = async () => {
-      if (!owner || !repo) {
+      const resolvedOwner = owner || DEFAULT_OWNER;
+      if (!repo) {
         setError('Missing repository information');
         setLoading(false);
         return;
@@ -40,6 +43,7 @@ export default function PreviewPage() {
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
               repo,
+              owner: resolvedOwner,
               branch: targetBranch,
               envVars: {},
               startMode: 'vite',
@@ -58,7 +62,7 @@ export default function PreviewPage() {
           // Specific commit
           const cache = await api('/api/cache');
           const existing = cache.find((e: CacheEntry) =>
-            e.repo === repo && e.sha === commit
+            e.owner === resolvedOwner && e.repo === repo && e.sha === commit
           );
 
           if (existing) {
@@ -72,6 +76,7 @@ export default function PreviewPage() {
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
               repo,
+              owner: resolvedOwner,
               sha: commit,
               envVars: {},
               startMode: 'vite',
