@@ -40,7 +40,8 @@ describe('validateRepo', () => {
   });
 
   it('rejects non-string input', () => {
-    expect(() => validateRepo(42 as any)).toThrow('invalid repo');
+    const invalidRepo: unknown = 42;
+    expect(() => validateRepo(invalidRepo)).toThrow('invalid repo');
   });
 });
 
@@ -84,7 +85,8 @@ describe('validateOwner', () => {
   });
 
   it('rejects non-string input', () => {
-    expect(() => validateOwner(null as any)).toThrow('invalid owner');
+    const invalidOwner: unknown = null;
+    expect(() => validateOwner(invalidOwner)).toThrow('invalid owner');
   });
 });
 
@@ -121,7 +123,8 @@ describe('validateSha', () => {
   });
 
   it('rejects non-string input', () => {
-    expect(() => validateSha(null as any)).toThrow('invalid sha');
+    const invalidSha: unknown = null;
+    expect(() => validateSha(invalidSha)).toThrow('invalid sha');
   });
 });
 
@@ -168,6 +171,7 @@ describe('validateBranch', () => {
   });
 
   it('rejects non-string input', () => {
-    expect(() => validateBranch(undefined as any)).toThrow('invalid branch');
+    const invalidBranch: unknown = undefined;
+    expect(() => validateBranch(invalidBranch)).toThrow('invalid branch');
   });
 });
