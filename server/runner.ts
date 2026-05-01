@@ -10,6 +10,41 @@ export function getTargetDir(repo: string, sha: string): string {
   return safeTargetSubdir(repo, sha);
 }
 
+const CHILD_ENV_ALLOWLIST = new Set([
+  'PATH',
+  'HOME',
+  'NODE_ENV',
+  'USER',
+  'SHELL',
+  'TERM',
+  'LANG',
+  'LC_ALL',
+  'npm_config_cache',
+  'NPM_CONFIG_CACHE',
+]);
+
+export function buildChildEnv(
+  userEnv: Record<string, string> = {},
+  runtime: { PORT: string; HOST?: string; BASE?: string }
+): Record<string, string> {
+  const env: Record<string, string> = {};
+
+  for (const key of CHILD_ENV_ALLOWLIST) {
+    const value = process.env[key];
+    if (value !== undefined) env[key] = value;
+  }
+
+  env.PORT = runtime.PORT;
+  if (runtime.HOST !== undefined) env.HOST = runtime.HOST;
+  if (runtime.BASE !== undefined) env.BASE = runtime.BASE;
+
+  for (const [key, value] of Object.entries(userEnv)) {
+    env[key] = value;
+  }
+
+  return env;
+}
+
 export async function cloneAndStart(
   repo: string,
   sha: string,
@@ -50,8 +85,20 @@ export async function cloneAndStart(
     writeFileSync(path.join(dir, '.env'), envContent, 'utf-8');
   }
 
+  const processEnv = buildChildEnv(opts?.envVars || {}, {
+    PORT: String(port),
+    HOST: '0.0.0.0',
+    BASE: `/proxy/${port}/`,
+  });
+  const viteEnv = {
+    ...processEnv,
+    VITE_PORT: String(port),
+    VITE_HOST: '0.0.0.0',
+    VITE_BASE: `/proxy/${port}/`,
+  };
+
   // Install deps
-  execSync('npm install', { cwd: dir, stdio: 'pipe', timeout: 120_000 });
+  execSync('npm install', { cwd: dir, stdio: 'pipe', timeout: 120_000, env: processEnv });
 
   // Check if this project actually uses Vite
   const pkgJson = JSON.parse(readFileSync(path.join(dir, 'package.json'), 'utf-8'));
@@ -67,7 +114,7 @@ export async function cloneAndStart(
     // Nuke node_modules and retry once
     console.warn(`[runner] Vite dist missing in ${dir}, retrying install...`);
     rmSync(path.join(dir, 'node_modules'), { recursive: true, force: true });
-    execSync('npm install', { cwd: dir, stdio: 'pipe', timeout: 120_000 });
+    execSync('npm install', { cwd: dir, stdio: 'pipe', timeout: 120_000, env: processEnv });
     if (!existsSync(viteCli)) {
       throw new Error(`Vite install incomplete — ${viteCli} still missing after retry`);
     }
@@ -75,18 +122,6 @@ export async function cloneAndStart(
 
   const hmrEnabled = !!opts?.isLatest;
   const startMode = opts?.startMode || 'vite';
-
-  // Build env vars to pass to the process
-  const processEnv = {
-    ...process.env,
-    PORT: String(port),
-    HOST: '0.0.0.0',
-    BASE: `/proxy/${port}/`,
-    VITE_PORT: String(port),
-    VITE_HOST: '0.0.0.0',
-    VITE_BASE: `/proxy/${port}/`,
-    ...(opts?.envVars || {}),
-  };
 
   // Write HMR wrapper config so Vite WebSocket connects through the proxy
   const wrapperPath = path.join(dir, '.live-edit-vite.config.ts');
@@ -123,7 +158,7 @@ export default defineConfig({
       cwd: dir,
       stdio: ['ignore', logFd, logFd],
       detached: true,
-      env: processEnv,
+      env: viteEnv,
     });
   } else {
     // Use npx vite with flags (default, most reliable)
@@ -132,7 +167,7 @@ export default defineConfig({
       cwd: dir,
       stdio: ['ignore', logFd, logFd],
       detached: true,
-      env: processEnv,
+      env: viteEnv,
     });
   }
 
@@ -156,7 +191,8 @@ export async function pullLatest(entry: CacheEntry, newSha: string) {
   execFileSync('git', ['reset', '--hard', `origin/${branch}`], { cwd: entry.dir, stdio: 'pipe' });
   // Quick npm install in case deps changed
   try {
-    execSync('npm install', { cwd: entry.dir, stdio: 'pipe', timeout: 60_000 });
+    const env = buildChildEnv({}, { PORT: String(entry.port || ''), HOST: '0.0.0.0', BASE: entry.port ? `/proxy/${entry.port}/` : undefined });
+    execSync('npm install', { cwd: entry.dir, stdio: 'pipe', timeout: 60_000, env });
   } catch {}
 }
 
