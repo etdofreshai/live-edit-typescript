@@ -26,8 +26,70 @@ const version = packageInfo.version || '0.0.0';
 let warnedDevWebhookUrl = false;
 const inflight = new Map<string, Promise<CacheEntry>>();
 
+type ErrorLike = { message?: string };
+type WildcardParams = express.Request['params'] & { 0?: string };
+type SelfHandleRequest = http.IncomingMessage & {
+  __selfHandle?: boolean;
+  originalUrl?: string;
+};
+type VoiceContext = {
+  owner?: string;
+  repo?: string;
+  branch?: string;
+  sha?: string;
+};
+type GatewayInputContentPart =
+  | { type: 'input_text'; text: string }
+  | { type: 'input_image'; source: { type: 'base64'; media_type: string; data: string } };
+type GatewayInput = {
+  type: 'message';
+  role: 'user';
+  content: GatewayInputContentPart[];
+};
+type GatewayResponseContentPart = {
+  type?: string;
+  text?: string;
+};
+type GatewayResponseOutputItem = {
+  type?: string;
+  role?: string;
+  content?: GatewayResponseContentPart[];
+};
+type GatewayResponseBody = {
+  output?: GatewayResponseOutputItem[];
+  choices?: Array<{ message?: { content?: string } }>;
+};
+type MulterErrorLike = ErrorLike & {
+  name?: string;
+  code?: string;
+};
+
+function errorMessage(e: unknown): string {
+  return e instanceof Error ? e.message : String(e ?? '');
+}
+
+function isErrorLike(e: unknown): e is ErrorLike {
+  return typeof e === 'object' && e !== null && 'message' in e;
+}
+
+function parseJsonObject(value: string | undefined): unknown {
+  return value ? JSON.parse(value) : undefined;
+}
+
+function isVoiceContext(value: unknown): value is VoiceContext {
+  return typeof value === 'object' && value !== null;
+}
+
+function isStringArray(value: unknown): value is string[] {
+  return Array.isArray(value) && value.every(item => typeof item === 'string');
+}
+
+function toGatewayResponseBody(value: unknown): GatewayResponseBody | null {
+  return typeof value === 'object' && value !== null ? value as GatewayResponseBody : null;
+}
+
 function validationMessage(e: unknown): string {
-  const message = e instanceof Error ? e.message : '';
+  const message = errorMessage(e);
   if (message.startsWith('invalid repo:')) return 'invalid repo';
   if (message.startsWith('invalid owner:')) return 'invalid owner';
   if (message.startsWith('invalid sha:')) return 'invalid sha';
@@ -85,7 +147,6 @@ async function refreshLatestEntry(entry: CacheEntry, headSha: string) {
   }
 
   const oldId = entry.id;
-  const oldDir = entry.dir;
   const port = entry.port || await allocatePort();
   if (!port) throw new Error('No ports available');
 
@@ -151,9 +212,9 @@ app.get('/api/repos', async (_req, res) => {
   try {
     const repos = await listRepos();
     res.json(repos);
-  } catch (e: any) {
-    if (e.message?.startsWith('invalid ')) return res.status(400).json({ error: validationMessage(e) });
-    res.status(500).json({ error: e.message });
+  } catch (e: unknown) {
+    if (errorMessage(e).startsWith('invalid ')) return res.status(400).json({ error: validationMessage(e) });
+    res.status(500).json({ error: errorMessage(e) });
   }
 });
 
@@ -161,9 +222,9 @@ app.get('/api/repos/:owner', async (req, res) => {
   try {
     const owner = validateOwner(req.params.owner);
     res.json(await listRepos(owner));
-  } catch (e: any) {
-    if (e.message?.startsWith('invalid ')) return res.status(400).json({ error: validationMessage(e) });
-    res.status(500).json({ error: e.message });
+  } catch (e: unknown) {
+    if (errorMessage(e).startsWith('invalid ')) return res.status(400).json({ error: validationMessage(e) });
+    res.status(500).json({ error: errorMessage(e) });
   }
 });
 
@@ -172,9 +233,9 @@ app.get('/api/repos/:owner/:repo/branches', async (req, res) => {
     const owner = validateOwner(req.params.owner);
     const repo = validateRepo(req.params.repo);
     res.json(await listBranches(owner, repo));
-  } catch (e: any) {
-    if (e.message?.startsWith('invalid ')) return res.status(400).json({ error: validationMessage(e) });
-    res.status(500).json({ error: e.message });
+  } catch (e: unknown) {
+    if (errorMessage(e).startsWith('invalid ')) return res.status(400).json({ error: validationMessage(e) });
+    res.status(500).json({ error: errorMessage(e) });
   }
 });
 
@@ -183,9 +244,9 @@ app.get('/api/repos/:repo/branches', async (req, res) => {
     markLegacyOwner(res);
     const repo = validateRepo(req.params.repo);
     res.json(await listBranches(DEFAULT_OWNER, repo));
-  } catch (e: any) {
-    if (e.message?.startsWith('invalid ')) return res.status(400).json({ error: validationMessage(e) });
-    res.status(500).json({ error: e.message });
+  } catch (e: unknown) {
+    if (errorMessage(e).startsWith('invalid ')) return res.status(400).json({ error: validationMessage(e) });
+    res.status(500).json({ error: errorMessage(e) });
   }
 });
 
@@ -200,10 +261,10 @@ app.post('/api/repos/:owner/:repo/branches', async (req, res) => {
     const sha = await getBranchHead(owner, repo, fromBranch);
     const ref = await createBranch(owner, repo, branchName, sha);
     res.json({ name, sha, ref: ref.ref });
-  } catch (e: any) {
-    if (e.message?.startsWith('invalid ')) return res.status(400).json({ error: validationMessage(e) });
-    const status = e.message.includes('already exists') ? 409 : 500;
-    res.status(status).json({ error: e.message });
+  } catch (e: unknown) {
+    if (errorMessage(e).startsWith('invalid ')) return res.status(400).json({ error: validationMessage(e) });
+    const status = errorMessage(e).includes('already exists') ? 409 : 500;
+    res.status(status).json({ error: errorMessage(e) });
   }
 });
 
@@ -218,10 +279,10 @@ app.post('/api/repos/:repo/branches', async (req, res) => {
     const sha = await getBranchHead(DEFAULT_OWNER, repo, fromBranch);
     const ref = await createBranch(DEFAULT_OWNER, repo, branchName, sha);
     res.json({ name, sha, ref: ref.ref });
-  } catch (e: any) {
-    if (e.message?.startsWith('invalid ')) return res.status(400).json({ error: validationMessage(e) });
-    const status = e.message.includes('already exists') ? 409 : 500;
-    res.status(status).json({ error: e.message });
+  } catch (e: unknown) {
+    if (errorMessage(e).startsWith('invalid ')) return res.status(400).json({ error: validationMessage(e) });
+    const status = errorMessage(e).includes('already exists') ? 409 : 500;
+    res.status(status).json({ error: errorMessage(e) });
   }
 });
 
@@ -236,9 +297,9 @@ app.get('/api/repos/:owner/:repo/branches/:branch/compare', async (req, res) => 
     }
     const cmp = await compareBranches(owner, repo, defaultBranch, branch);
     res.json({ ahead: cmp.ahead_by, behind: cmp.behind_by, defaultBranch });
-  } catch (e: any) {
-    if (e.message?.startsWith('invalid ')) return res.status(400).json({ error: validationMessage(e) });
-    res.status(500).json({ error: e.message });
+  } catch (e: unknown) {
+    if (errorMessage(e).startsWith('invalid ')) return res.status(400).json({ error: validationMessage(e) });
+    res.status(500).json({ error: errorMessage(e) });
   }
 });
 
@@ -253,9 +314,9 @@ app.get('/api/repos/:repo/branches/:branch/compare', async (req, res) => {
     }
     const cmp = await compareBranches(DEFAULT_OWNER, repo, defaultBranch, branch);
     res.json({ ahead: cmp.ahead_by, behind: cmp.behind_by, defaultBranch });
-  } catch (e: any) {
-    if (e.message?.startsWith('invalid ')) return res.status(400).json({ error: validationMessage(e) });
-    res.status(500).json({ error: e.message });
+  } catch (e: unknown) {
+    if (errorMessage(e).startsWith('invalid ')) return res.status(400).json({ error: validationMessage(e) });
+    res.status(500).json({ error: errorMessage(e) });
   }
 });
 
@@ -269,9 +330,9 @@ app.post('/api/repos/:owner/:repo/pulls', async (req, res) => {
     const baseBranch = validateBranch(base);
     const pr = await createPullRequest(owner, repo, title, headBranch, baseBranch, body);
     res.json({ url: pr.html_url, number: pr.number });
-  } catch (e: any) {
-    if (e.message?.startsWith('invalid ')) return res.status(400).json({ error: validationMessage(e) });
-    res.status(500).json({ error: e.message });
+  } catch (e: unknown) {
+    if (errorMessage(e).startsWith('invalid ')) return res.status(400).json({ error: validationMessage(e) });
+    res.status(500).json({ error: errorMessage(e) });
   }
 });
 
@@ -285,9 +346,9 @@ app.post('/api/repos/:repo/pulls', async (req, res) => {
     const baseBranch = validateBranch(base);
     const pr = await createPullRequest(DEFAULT_OWNER, repo, title, headBranch, baseBranch, body);
     res.json({ url: pr.html_url, number: pr.number });
-  } catch (e: any) {
-    if (e.message?.startsWith('invalid ')) return res.status(400).json({ error: validationMessage(e) });
-    res.status(500).json({ error: e.message });
+  } catch (e: unknown) {
+    if (errorMessage(e).startsWith('invalid ')) return res.status(400).json({ error: validationMessage(e) });
+    res.status(500).json({ error: errorMessage(e) });
   }
 });
 
@@ -297,9 +358,9 @@ app.get('/api/repos/:owner/:repo/branches/:branch/commits', async (req, res) => 
     const repo = validateRepo(req.params.repo);
     const branch = validateBranch(req.params.branch);
     res.json(await listCommits(owner, repo, branch));
-  } catch (e: any) {
-    if (e.message?.startsWith('invalid ')) return res.status(400).json({ error: validationMessage(e) });
-    res.status(500).json({ error: e.message });
+  } catch (e: unknown) {
+    if (errorMessage(e).startsWith('invalid ')) return res.status(400).json({ error: validationMessage(e) });
+    res.status(500).json({ error: errorMessage(e) });
   }
 });
 
@@ -309,9 +370,9 @@ app.get('/api/repos/:repo/branches/:branch/commits', async (req, res) => {
     const repo = validateRepo(req.params.repo);
     const branch = validateBranch(req.params.branch);
     res.json(await listCommits(DEFAULT_OWNER, repo, branch));
-  } catch (e: any) {
-    if (e.message?.startsWith('invalid ')) return res.status(400).json({ error: validationMessage(e) });
-    res.status(500).json({ error: e.message });
+  } catch (e: unknown) {
+    if (errorMessage(e).startsWith('invalid ')) return res.status(400).json({ error: validationMessage(e) });
+    res.status(500).json({ error: errorMessage(e) });
   }
 });
 
@@ -359,9 +420,9 @@ app.post('/api/run', async (req, res) => {
   if (pending) {
     try {
       return res.json(await pending);
-    } catch (e: any) {
-      if (e.message?.startsWith('invalid ')) return res.status(400).json({ error: validationMessage(e) });
-      return res.status(500).json({ error: e.message });
+    } catch (e: unknown) {
+      if (errorMessage(e).startsWith('invalid ')) return res.status(400).json({ error: validationMessage(e) });
+      return res.status(500).json({ error: errorMessage(e) });
     }
   }
 
@@ -401,10 +462,10 @@ app.post('/api/run', async (req, res) => {
   inflight.set(inflightKey, promise);
   try {
     res.json(await promise);
-  } catch (e: any) {
-    if (e.message?.startsWith('invalid ')) return res.status(400).json({ error: validationMessage(e) });
-    const status = e.message === 'No ports available' ? 503 : 500;
-    res.status(status).json({ error: e.message });
+  } catch (e: unknown) {
+    if (errorMessage(e).startsWith('invalid ')) return res.status(400).json({ error: validationMessage(e) });
+    const status = errorMessage(e) === 'No ports available' ? 503 : 500;
+    res.status(status).json({ error: errorMessage(e) });
   } finally {
     inflight.delete(inflightKey);
   }
@@ -432,9 +493,9 @@ app.post('/api/run-latest', async (req, res) => {
   if (pending) {
     try {
       return res.json(await pending);
-    } catch (e: any) {
-      if (e.message?.startsWith('invalid ')) return res.status(400).json({ error: validationMessage(e) });
-      return res.status(500).json({ error: e.message });
+    } catch (e: unknown) {
+      if (errorMessage(e).startsWith('invalid ')) return res.status(400).json({ error: validationMessage(e) });
+      return res.status(500).json({ error: errorMessage(e) });
     }
   }
 
@@ -483,10 +544,10 @@ app.post('/api/run-latest', async (req, res) => {
   inflight.set(inflightKey, promise);
   try {
     res.json(await promise);
-  } catch (e: any) {
-    if (e.message?.startsWith('invalid ')) return res.status(400).json({ error: validationMessage(e) });
-    const status = e.message === 'No ports available' ? 503 : 500;
-    res.status(status).json({ error: e.message });
+  } catch (e: unknown) {
+    if (errorMessage(e).startsWith('invalid ')) return res.status(400).json({ error: validationMessage(e) });
+    const status = errorMessage(e) === 'No ports available' ? 503 : 500;
+    res.status(status).json({ error: errorMessage(e) });
   } finally {
     inflight.delete(inflightKey);
   }
@@ -522,8 +583,8 @@ app.get('/api/cache/:id/files', async (req, res) => {
   try {
     const result = await walkBounded(entry.dir);
     res.json(result);
-  } catch (e: any) {
-    res.status(500).json({ error: e.message });
+  } catch (e: unknown) {
+    res.status(500).json({ error: errorMessage(e) });
   }
 });
 
@@ -531,7 +592,7 @@ app.get('/api/cache/:id/files/*', async (req, res) => {
   const entry = getEntryById(req.params.id);
   if (!entry) return res.status(404).json({ error: 'Not found' });
 
-  const filePath = (req.params as any)[0] as string;
+  const filePath = (req.params as WildcardParams)[0] ?? '';
   if (pathModule.isAbsolute(filePath)) return res.status(403).json({ error: 'Forbidden' });
   const fullPath = pathModule.resolve(entry.dir, filePath);
 
@@ -547,8 +608,9 @@ app.get('/api/cache/:id/files/*', async (req, res) => {
     if (sample.includes(0)) return res.json({ binary: true, path: filePath });
 
     res.json({ content: buf.toString('utf-8'), path: filePath });
-  } catch (e: any) {
-    if (e.message === 'path outside targets' || e.message === 'path outside entry') {
+  } catch (e: unknown) {
+    const message = errorMessage(e);
+    if (message === 'path outside targets' || message === 'path outside entry') {
       return res.status(403).json({ error: 'Forbidden' });
     }
     res.status(404).json({ error: 'File not found' });
@@ -618,12 +680,20 @@ app.post('/api/voice', upload.fields([{ name: 'audio', maxCount: 1 }, { name: 's
   const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
   if (!OPENAI_API_KEY) return res.status(500).json({ error: 'OPENAI_API_KEY not configured' });
 
-  let context: any;
-  let consoleLogs: any;
+  let context: VoiceContext | undefined;
+  let consoleLogs: string[] | undefined;
   try {
-    try { context = req.body.context ? JSON.parse(req.body.context) : undefined; }
+    try {
+      const parsedContext = parseJsonObject(req.body.context);
+      if (parsedContext !== undefined && !isVoiceContext(parsedContext)) return res.status(400).json({ error: 'invalid context' });
+      context = parsedContext;
+    }
     catch { return res.status(400).json({ error: 'invalid context' }); }
-    try { consoleLogs = req.body.consoleLogs ? JSON.parse(req.body.consoleLogs) : undefined; }
+    try {
+      const parsedConsoleLogs = parseJsonObject(req.body.consoleLogs);
+      if (parsedConsoleLogs !== undefined && !isStringArray(parsedConsoleLogs)) return res.status(400).json({ error: 'invalid consoleLogs' });
+      consoleLogs = parsedConsoleLogs;
+    }
     catch { return res.status(400).json({ error: 'invalid consoleLogs' }); }
     if (context?.repo) validateRepo(context.repo);
     if (context?.owner) validateOwner(context.owner);
@@ -706,7 +776,7 @@ app.post('/api/voice', upload.fields([{ name: 'audio', maxCount: 1 }, { name: 's
       }
 
       // Build input for OpenResponses API
-      const contentParts: any[] = [
+      const contentParts: GatewayInputContentPart[] = [
         { type: 'input_text', text: messageText }
       ];
       
@@ -720,7 +790,7 @@ app.post('/api/voice', upload.fields([{ name: 'audio', maxCount: 1 }, { name: 's
         console.log(`[voice] Screenshot attached (${Math.round(base64.length / 1024)}KB base64)`);
       }
       
-      const input = [
+      const input: GatewayInput[] = [
         { type: 'message', role: 'user', content: contentParts }
       ];
 
@@ -738,8 +808,8 @@ app.post('/api/voice', upload.fields([{ name: 'audio', maxCount: 1 }, { name: 's
       });
 
       // Parse response body (for transcript history) before checking status
-      let responseBody: any = null;
-      try { responseBody = await gatewayRes.json(); } catch {}
+      let responseBody: GatewayResponseBody | null = null;
+      try { responseBody = toGatewayResponseBody(await gatewayRes.json()); } catch {}
 
       if (!gatewayRes.ok) {
         console.error('OpenClaw gateway error:', responseBody);
@@ -753,11 +823,11 @@ app.post('/api/voice', upload.fields([{ name: 'audio', maxCount: 1 }, { name: 's
       // Extract assistant response text from OpenAI Responses API format
       let responseText: string | undefined;
       try {
-        const outputItems: any[] = responseBody?.output || [];
+        const outputItems = responseBody?.output || [];
         for (const item of outputItems) {
           if (item?.type === 'message' && item?.role === 'assistant') {
-            const contentParts: any[] = Array.isArray(item.content) ? item.content : [];
-            const textPart = contentParts.find((c: any) => c.type === 'output_text' || c.type === 'text');
+            const contentParts = Array.isArray(item.content) ? item.content : [];
+            const textPart = contentParts.find(c => c.type === 'output_text' || c.type === 'text');
             if (textPart?.text) { responseText = textPart.text; break; }
           }
         }
@@ -776,9 +846,9 @@ app.post('/api/voice', upload.fields([{ name: 'audio', maxCount: 1 }, { name: 's
 
       console.log('[voice] Sent to OpenClaw:', text.slice(0, 50));
       job.status = 'sent';
-    } catch (e: any) {
+    } catch (e: unknown) {
       console.error('[voice] Error:', e);
-      job.status = 'error'; job.error = e.message;
+      job.status = 'error'; job.error = errorMessage(e);
       // Also mark transcript entry as error if it exists
       const histEntry = transcriptHistory.find(e => e.status === 'pending');
       if (histEntry) histEntry.status = 'error';
@@ -787,9 +857,10 @@ app.post('/api/voice', upload.fields([{ name: 'audio', maxCount: 1 }, { name: 's
 });
 
 // Multer error handler — catches file-too-large, too-many-files, etc.
-app.use((err: any, _req: express.Request, res: express.Response, next: express.NextFunction) => {
-  if (err?.name === 'MulterError') {
-    const code = err.code;
+app.use((err: unknown, _req: express.Request, res: express.Response, next: express.NextFunction) => {
+  if (isErrorLike(err) && (err as MulterErrorLike).name === 'MulterError') {
+    const multerError = err as MulterErrorLike;
+    const code = multerError.code;
     if (code === 'LIMIT_FILE_SIZE' || code === 'LIMIT_UNEXPECTED_FILE') {
       return res.status(413).json({ error: 'File too large' });
     }
@@ -808,20 +879,21 @@ app.get('/api/cache/:id/sha', (req, res) => {
 // Inject live-reload script into proxied HTML responses
 proxy.on('proxyRes', (proxyRes, req, res) => {
   // For non-selfHandleResponse requests, this is just informational — skip
-  if (!(req as any).__selfHandle) return;
+  const proxyReq = req as SelfHandleRequest;
+  if (!proxyReq.__selfHandle) return;
 
   const ct = proxyRes.headers['content-type'] || '';
   const isHtml = ct.includes('text/html');
 
   // Extract port and find cache entry
-  const portMatch = (req as any).originalUrl?.match(/^\/proxy\/(\d+)/);
+  const portMatch = proxyReq.originalUrl?.match(/^\/proxy\/(\d+)/);
   const port = portMatch ? parseInt(portMatch[1]) : 0;
   const entry = port ? getEntryByPort(port) : null;
 
   if (!isHtml || !entry) {
     // Pass through non-HTML responses unchanged
     (res as http.ServerResponse).writeHead(proxyRes.statusCode || 200, proxyRes.headers);
-    proxyRes.pipe(res as any);
+    proxyRes.pipe(res);
     return;
   }
 
@@ -873,7 +945,7 @@ app.use('/proxy/:port', (req, res) => {
   }
   // Reconstruct the full URL with the /proxy/{port} prefix
   req.url = `/proxy/${port}${req.url || '/'}`;
-  (req as any).__selfHandle = true;
+  (req as SelfHandleRequest).__selfHandle = true;
   proxy.web(req, res, { target: `http://localhost:${port}`, selfHandleResponse: true });
 });
 
@@ -946,8 +1018,8 @@ server.listen(3000, () => {
           console.log(`[latest] ${entry.repo}/${entry.branch}: ${entry.sha.slice(0, 7)} → ${headSha.slice(0, 7)}`);
           await refreshLatestEntry(entry, headSha);
         }
-      } catch (e: any) {
-        console.error(`[latest] poll error for ${entry.repo}/${entry.branch}:`, e.message);
+      } catch (e: unknown) {
+        console.error(`[latest] poll error for ${entry.repo}/${entry.branch}:`, errorMessage(e));
       }
     }
   }, 10_000);
