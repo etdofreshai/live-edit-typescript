@@ -1,4 +1,4 @@
-import { execFileSync, execSync, spawn } from 'child_process';
+import { execFileSync, spawn } from 'child_process';
 import { existsSync, rmSync, readFileSync, openSync, closeSync, writeFileSync } from 'fs';
 import path from 'path';
 import type { CacheEntry } from './cache-manager.js';
@@ -43,6 +43,21 @@ export function buildChildEnv(
   }
 
   return env;
+}
+
+function installDependencies(dir: string, env?: Record<string, string>) {
+  const hasLockfile = existsSync(path.join(dir, 'package-lock.json'));
+  const args = hasLockfile
+    ? ['ci', '--ignore-scripts']
+    : ['install', '--ignore-scripts', '--no-audit', '--no-fund'];
+
+  // Arbitrary preview repos must not run npm lifecycle scripts on the host by default.
+  execFileSync('npm', args, {
+    cwd: dir,
+    stdio: 'pipe',
+    timeout: 120_000,
+    ...(env ? { env } : {}),
+  });
 }
 
 export async function cloneAndStart(
@@ -97,8 +112,8 @@ export async function cloneAndStart(
     VITE_BASE: `/proxy/${port}/`,
   };
 
-  // Install deps
-  execSync('npm install', { cwd: dir, stdio: 'pipe', timeout: 120_000, env: processEnv });
+  // Install deps (no lifecycle scripts; scrubbed env)
+  installDependencies(dir, processEnv);
 
   // Check if this project actually uses Vite
   const pkgJson = JSON.parse(readFileSync(path.join(dir, 'package.json'), 'utf-8'));
@@ -114,7 +129,7 @@ export async function cloneAndStart(
     // Nuke node_modules and retry once
     console.warn(`[runner] Vite dist missing in ${dir}, retrying install...`);
     rmSync(path.join(dir, 'node_modules'), { recursive: true, force: true });
-    execSync('npm install', { cwd: dir, stdio: 'pipe', timeout: 120_000, env: processEnv });
+    installDependencies(dir, processEnv);
     if (!existsSync(viteCli)) {
       throw new Error(`Vite install incomplete — ${viteCli} still missing after retry`);
     }
@@ -191,8 +206,12 @@ export async function pullLatest(entry: CacheEntry, newSha: string) {
   execFileSync('git', ['reset', '--hard', `origin/${branch}`], { cwd: entry.dir, stdio: 'pipe' });
   // Quick npm install in case deps changed
   try {
-    const env = buildChildEnv({}, { PORT: String(entry.port || ''), HOST: '0.0.0.0', BASE: entry.port ? `/proxy/${entry.port}/` : undefined });
-    execSync('npm install', { cwd: entry.dir, stdio: 'pipe', timeout: 60_000, env });
+    const env = buildChildEnv({}, {
+      PORT: String(entry.port || ''),
+      HOST: '0.0.0.0',
+      BASE: entry.port ? `/proxy/${entry.port}/` : undefined,
+    });
+    installDependencies(entry.dir, env);
   } catch {}
 }
 
