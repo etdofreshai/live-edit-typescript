@@ -42,20 +42,25 @@ export function clearAdminToken(): void {
   setAdminToken('');
 }
 
-function isSameOriginApiRequest(input: RequestInfo | URL): boolean {
-  if (typeof window === 'undefined') return false;
+export function isSameOriginApiRequest(input: RequestInfo | URL, origin: string, baseUrl: string): boolean {
   const raw = input instanceof Request ? input.url : String(input);
-  const url = new URL(raw, window.location.origin);
-  if (url.origin !== window.location.origin) return false;
+  const url = new URL(raw, origin);
+  if (url.origin !== origin) return false;
 
-  const basePath = new URL(import.meta.env.BASE_URL, window.location.origin).pathname;
+  const basePath = new URL(baseUrl, origin).pathname;
   const apiBase = `${basePath.replace(/\/$/, '')}/api/`;
   return url.pathname === `${basePath.replace(/\/$/, '')}/api` || url.pathname.startsWith(apiBase);
 }
 
 export function withAdminToken(input: RequestInfo | URL, opts: RequestInit = {}): RequestInit {
   const token = getAdminToken();
-  if (!token || !isSameOriginApiRequest(input)) return opts;
+  if (
+    !token ||
+    typeof window === 'undefined' ||
+    !isSameOriginApiRequest(input, window.location.origin, import.meta.env.BASE_URL)
+  ) {
+    return opts;
+  }
 
   const headers = new Headers(opts.headers);
   if (!headers.has('Authorization') && !headers.has('x-admin-token')) {
@@ -68,8 +73,7 @@ export function apiFetch(input: RequestInfo | URL, opts?: RequestInit): Promise<
   return fetch(input, withAdminToken(input, opts));
 }
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-export async function api<T = any>(path: string, opts?: RequestInit): Promise<T> {
+export async function api<T = unknown>(path: string, opts?: RequestInit): Promise<T> {
   const res = await apiFetch(path, opts);
   if (!res.ok) {
     let message = `HTTP ${res.status}`;

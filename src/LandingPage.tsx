@@ -30,8 +30,8 @@ export default function LandingPage() {
   const [gitInfo, setGitInfo] = useState<GitInfo | null>(null);
 
   useEffect(() => {
-    api('/api/info').then(setGitInfo).catch(() => {});
-    api('/api/repos')
+    api<GitInfo>('/api/info').then(setGitInfo).catch(() => {});
+    api<Repo[]>('/api/repos')
       .then(repoList => {
         // Sort by updated_at descending
         const sorted = [...repoList].sort((a, b) =>
