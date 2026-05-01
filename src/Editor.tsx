@@ -4,7 +4,10 @@ import { VoiceButton } from './VoiceButton';
 import { IframeWithRetry } from './IframeWithRetry';
 import { TranscriptHistoryModal } from './TranscriptHistoryModal';
 import { BranchList } from './components/BranchList';
+import { CachePanel } from './components/CachePanel';
 import { CommitList } from './components/CommitList';
+import { EnvModal } from './components/EnvModal';
+import { LogModal } from './components/LogModal';
 import { RepoSelector } from './components/RepoSelector';
 import { Branch, CacheEntry, Commit, Repo } from './types';
 
@@ -539,6 +542,16 @@ export default function Editor({ initialOwner, initialRepo, initialBranch, initi
     refreshCache().catch(() => {});
   };
 
+  const refreshLog = async () => {
+    if (!activeEntry) return;
+    try {
+      const res = await api(`/api/cache/${activeEntry.id}/log`);
+      setLogContent(res.log || '(no log output)');
+    } catch {
+      setLogContent('(failed to fetch log)');
+    }
+  };
+
   return (
     <div className="app-container">
       {showHeader && (
@@ -577,8 +590,7 @@ export default function Editor({ initialOwner, initialRepo, initialBranch, initi
           <div className="top-bar-controls">
             <button className="top-bar-btn" onClick={() => { if (activeEntry) { setSelectedRepo(activeEntry.repo); setShowEnvModal(true); } }} title="Environment variables">⚙️ Env</button>
             <button className="top-bar-btn" onClick={async () => {
-              if (!activeEntry) return;
-              try { const res = await api(`/api/cache/${activeEntry.id}/log`); setLogContent(res.log || '(no log output)'); } catch { setLogContent('(failed to fetch log)'); }
+              await refreshLog();
               setShowLogModal(true);
             }} title="Server log">📋 Log</button>
             <button className="top-bar-btn" onClick={() => setSidebarOpen(o => !o)} title={sidebarOpen ? 'Hide sidebar' : 'Show sidebar'}>{sidebarOpen ? '✕' : '☰'}</button>
@@ -643,29 +655,7 @@ export default function Editor({ initialOwner, initialRepo, initialBranch, initi
           )}
         </button>
 
-        <h3>Cache ({cache.length}/10)</h3>
-        {cache.map(e => (
-          <div key={e.id} className="cache-card">
-            <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
-              <span className="cache-repo">{e.repo}</span>
-              <code className="cache-sha">{e.sha.slice(0, 7)}</code>
-              <a
-                href={`https://github.com/etdofreshai/${e.repo}/commit/${e.sha}`}
-                target="_blank"
-                rel="noopener noreferrer"
-                style={{ color: '#6b7280', fontSize: 10, textDecoration: 'none' }}
-                title="View on GitHub"
-              >↗</a>
-              {e.type !== 'static' && <span className="cache-port">:{e.port}</span>}
-              {e.type === 'static' && <span style={{ color: '#6b7280', fontSize: 11 }}>static</span>}
-              {e.isLatest && <span className="cache-badge">latest · {e.branch}</span>}
-            </div>
-            <div>
-              <button className="btn-icon" onClick={() => showEntry(e)}>👁</button>
-              <button className="btn-icon danger" onClick={() => remove(e.id)}>✕</button>
-            </div>
-          </div>
-        ))}
+        <CachePanel cache={cache} onShowEntry={showEntry} onRemoveEntry={remove} />
       </div>
 
       <div className="preview-area">
@@ -778,75 +768,21 @@ export default function Editor({ initialOwner, initialRepo, initialBranch, initi
       </div>{/* close main-content */}
 
       {showEnvModal && (
-        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.7)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000 }} onClick={() => setShowEnvModal(false)}>
-          <div style={{ background: '#1a1a2e', border: '1px solid #3a3a5e', borderRadius: 12, padding: 24, width: 600, maxWidth: '90vw', maxHeight: '80vh', overflow: 'auto' }} onClick={e => e.stopPropagation()}>
-            <h3 style={{ marginTop: 0, color: '#cdd6f4' }}>.env — {selectedRepo}</h3>
-            <p style={{ color: '#6b7280', fontSize: 12, margin: '0 0 12px' }}>One variable per line: <code style={{ color: '#89b4fa' }}>KEY=value</code>. Lines starting with <code style={{ color: '#6b7280' }}>#</code> are comments.</p>
-            <textarea
-              value={envText}
-              onChange={e => setEnvText(e.target.value)}
-              placeholder={"# Database\nDATABASE_URL=postgresql://...\n\n# Ports\nBACKEND_PORT=3001"}
-              spellCheck={false}
-              style={{
-                width: '100%', minHeight: 250, background: '#16161e', border: '1px solid #3a3a5e',
-                borderRadius: 8, color: '#cdd6f4', padding: '12px 14px', fontSize: 13,
-                fontFamily: '"JetBrains Mono", "Fira Code", "Cascadia Code", monospace',
-                lineHeight: 1.6, resize: 'vertical', outline: 'none', boxSizing: 'border-box',
-                tabSize: 2,
-              }}
-            />
-            <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end', marginTop: 12 }}>
-              <button
-                onClick={() => setShowEnvModal(false)}
-                style={{ background: 'transparent', color: '#6b7280', border: '1px solid #3a3a5e', borderRadius: 6, padding: '6px 16px', cursor: 'pointer', fontSize: 13 }}
-              >
-                Cancel
-              </button>
-              <button
-                onClick={() => { saveEnvText(envText); setShowEnvModal(false); }}
-                style={{ background: '#a6e3a1', color: '#1a1a2e', border: 'none', borderRadius: 6, padding: '6px 20px', cursor: 'pointer', fontSize: 13, fontWeight: 600 }}
-              >
-                Save
-              </button>
-            </div>
-          </div>
-        </div>
+        <EnvModal
+          selectedRepo={selectedRepo}
+          envText={envText}
+          onChangeEnvText={setEnvText}
+          onSave={() => { saveEnvText(envText); setShowEnvModal(false); }}
+          onClose={() => setShowEnvModal(false)}
+        />
       )}
 
       {showLogModal && (
-        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.7)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000 }} onClick={() => setShowLogModal(false)}>
-          <div style={{ background: '#1a1a2e', border: '1px solid #3a3a5e', borderRadius: 12, padding: 24, width: 700, maxWidth: '90vw', maxHeight: '80vh', display: 'flex', flexDirection: 'column' }} onClick={e => e.stopPropagation()}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
-              <h3 style={{ margin: 0, color: '#cdd6f4' }}>Server Log</h3>
-              <button
-                onClick={async () => {
-                  if (!activeEntry) return;
-                  try {
-                    const res = await api(`/api/cache/${activeEntry.id}/log`);
-                    setLogContent(res.log || '(no log output)');
-                  } catch { setLogContent('(failed to fetch log)'); }
-                }}
-                style={{ background: 'transparent', color: '#89b4fa', border: '1px solid #3a3a5e', borderRadius: 6, padding: '2px 10px', cursor: 'pointer', fontSize: 12 }}
-              >
-                ↻ Refresh
-              </button>
-            </div>
-            <pre style={{
-              flex: 1, overflow: 'auto', background: '#16161e', border: '1px solid #3a3a5e',
-              borderRadius: 8, padding: '12px 14px', fontSize: 12, color: '#cdd6f4',
-              fontFamily: '"JetBrains Mono", "Fira Code", monospace', lineHeight: 1.5,
-              margin: 0, whiteSpace: 'pre-wrap', wordBreak: 'break-all',
-            }}>
-              {logContent}
-            </pre>
-            <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 12 }}>
-              <button onClick={() => setShowLogModal(false)}
-                style={{ background: 'transparent', color: '#6b7280', border: '1px solid #3a3a5e', borderRadius: 6, padding: '6px 16px', cursor: 'pointer', fontSize: 13 }}>
-                Close
-              </button>
-            </div>
-          </div>
-        </div>
+        <LogModal
+          logContent={logContent}
+          onRefresh={refreshLog}
+          onClose={() => setShowLogModal(false)}
+        />
       )}
 
       {showHeader && <VoiceButton context={activeEntry ? { owner: 'etdofreshai', repo: activeEntry.repo, branch: activeEntry.branch, sha: activeEntry.sha } : undefined} iframeRef={iframeRef} consoleLogs={consoleLogs} />}
