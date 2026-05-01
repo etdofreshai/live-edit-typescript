@@ -297,6 +297,12 @@ Live Edit clones and runs code from GitHub repos. Preview code should be treated
 - `LIVE_EDIT_NPM_CACHE` — override the shared npm cache directory (defaults to a temp dir)
 - `ADMIN_TOKEN` — when set, privileged routes require a matching token via `Authorization: Bearer <token>` or `x-admin-token: <token>` header. When unset, all routes are open (no change from previous behavior). This is a lightweight first guardrail, not a full user authentication system. Protected operations include run/run-latest, branch and PR creation, cache deletion, log and file reads, transcript history, and voice/upload routes.
 
+**Browser usage:** The server accepts the token as either `Authorization: Bearer <ADMIN_TOKEN>` or `x-admin-token: <ADMIN_TOKEN>`. A companion UI prompt is planned — once implemented, the browser will store the token in session storage and send it automatically on privileged requests. Until then, use `curl` with one of the header options above.
+
+**Token hygiene:**
+- Do **not** reuse a GitHub personal-access token or any production secret as the admin token.
+- Treat it as a shared admin secret — rotate it on a regular schedule and whenever it may have leaked.
+
 **GitHub token scope:** The token needs read access to repositories in the target org/account. If auto-registering webhooks, it also needs `write:repo_hook` scope.
 
 **Webhook behavior when secrets are missing:**
