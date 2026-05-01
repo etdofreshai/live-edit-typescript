@@ -63,7 +63,7 @@ export const IframeWithRetry = forwardRef<HTMLIFrameElement, IframeWithRetryProp
 
     if (!ready) {
       return (
-        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', height: '100%', color: '#6b7280', gap: 12, padding: 20 }}>
+        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', height: '100%', color: '#6b7280', gap: 12, padding: 20, background: '#1e1e2e' }}>
           {cancelled ? (
             <div>Cancelled</div>
           ) : timedOut ? (
@@ -102,7 +102,7 @@ export const IframeWithRetry = forwardRef<HTMLIFrameElement, IframeWithRetryProp
       <iframe
         ref={ref}
         src={`/proxy/${port}/`}
-        style={{ background: '#1a1a2e' }}
+        style={{ width: '100%', height: '100%', border: 'none', background: '#1a1a2e' }}
       />
     );
   }

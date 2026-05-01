@@ -7,7 +7,8 @@ export class ApiError extends Error {
   }
 }
 
-export async function api<T = unknown>(path: string, opts?: RequestInit): Promise<T> {
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+export async function api<T = any>(path: string, opts?: RequestInit): Promise<T> {
   const res = await fetch(path, opts);
   if (!res.ok) {
     let message = `HTTP ${res.status}`;
