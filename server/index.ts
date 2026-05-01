@@ -8,6 +8,7 @@ import multer from 'multer';
 // Using native FormData + Blob (Node 22)
 import { listRepos, listBranches, listCommits, getBranchHead, getCommit, createBranch, getDefaultBranch, compareBranches, createPullRequest, DEFAULT_OWNER } from './github.js';
 import { getEntry, addEntry, allocatePort, releasePort, removeEntry, listEntries, makeId, getEntryByPort, getLatestEntries, updateEntry, getEntryById } from './cache-manager.js';
+import { events as cacheEvents } from './cache-manager.js';
 import { cloneAndStart, pullLatest, getServerLog, stopServer } from './runner.js';
 import { webhookRouter, registerWebhook, unregisterWebhook } from './webhook.js';
 import { assertInsideTargets } from './path-safety.js';
@@ -316,6 +317,27 @@ app.get('/api/repos/:repo/branches/:branch/commits', async (req, res) => {
 
 app.get('/api/cache', (_req, res) => {
   res.json(listEntries());
+});
+
+app.get('/api/cache/stream', (req, res) => {
+  res.writeHead(200, {
+    'Content-Type': 'text/event-stream',
+    'Cache-Control': 'no-cache',
+    Connection: 'keep-alive',
+  });
+
+  const sendSnapshot = () => res.write(`data: ${JSON.stringify(listEntries())}\n\n`);
+  sendSnapshot();
+
+  const onChange = () => sendSnapshot();
+  cacheEvents.on('change', onChange);
+
+  const heartbeat = setInterval(() => res.write(': ping\n\n'), 25_000);
+
+  req.on('close', () => {
+    cacheEvents.off('change', onChange);
+    clearInterval(heartbeat);
+  });
 });
 
 app.post('/api/run', async (req, res) => {

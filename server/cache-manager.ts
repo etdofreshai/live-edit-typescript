@@ -1,3 +1,5 @@
+import { EventEmitter } from 'events';
+import net from 'net';
 import { stopServer, removeFiles } from './runner.js';
 import { safeTargetSubdir } from './path-safety.js';
 
@@ -17,12 +19,15 @@ export interface CacheEntry {
   type?: 'vite' | 'static';
 }
 
+export const events = new EventEmitter();
+
 const MAX_ENTRIES = 10;
 const PORT_MIN = 5174;
-const PORT_MAX = 5189;
+const PORT_MAX = 5273;
 
 const cache = new Map<string, CacheEntry>();
 const reservedPorts = new Set<number>();
+const blockedPorts = new Set<number>();
 
 class Mutex {
   private chain = Promise.resolve();
@@ -63,15 +68,30 @@ async function evictIfNeededLocked() {
   }
 }
 
+function probePort(port: number): Promise<boolean> {
+  return new Promise(resolve => {
+    const srv = net.createServer();
+    const timer = setTimeout(() => { srv.close(); resolve(false); }, 250);
+    srv.on('error', () => { clearTimeout(timer); resolve(false); });
+    srv.listen({ host: '127.0.0.1', port }, () => {
+      clearTimeout(timer);
+      srv.close(() => resolve(true));
+    });
+  });
+}
+
 export async function allocatePort(): Promise<number | null> {
   return cacheMutex.runExclusive(async () => {
     await evictIfNeededLocked();
     const used = usedPorts();
     for (let p = PORT_MIN; p <= PORT_MAX; p++) {
-      if (!used.has(p)) {
+      if (used.has(p) || blockedPorts.has(p)) continue;
+      const free = await probePort(p);
+      if (free) {
         reservedPorts.add(p);
         return p;
       }
+      blockedPorts.add(p);
     }
     return null;
   });
@@ -80,6 +100,8 @@ export async function allocatePort(): Promise<number | null> {
 export async function releasePort(port: number) {
   await cacheMutex.runExclusive(() => {
     reservedPorts.delete(port);
+    // Clear block so next allocate re-probes; avoids stale blocks after process exit
+    blockedPorts.delete(port);
   });
 }
 
@@ -96,10 +118,13 @@ export async function addEntry(entry: CacheEntry) {
     reservedPorts.delete(entry.port);
     cache.set(entry.id, entry);
   });
+  events.emit('change');
 }
 
 export async function evictIfNeeded() {
+  const before = cache.size;
   await cacheMutex.runExclusive(evictIfNeededLocked);
+  if (cache.size < before) events.emit('change');
 }
 
 async function removeEntryLocked(id: string) {
@@ -112,7 +137,9 @@ async function removeEntryLocked(id: string) {
 }
 
 export async function removeEntry(id: string) {
-  return cacheMutex.runExclusive(() => removeEntryLocked(id));
+  const result = await cacheMutex.runExclusive(() => removeEntryLocked(id));
+  if (result) events.emit('change');
+  return result;
 }
 
 export function listEntries(): CacheEntry[] {
@@ -132,7 +159,10 @@ export function getEntryById(id: string): CacheEntry | undefined {
 
 export function updateEntry(id: string, updates: Partial<CacheEntry>) {
   const e = cache.get(id);
-  if (e) Object.assign(e, updates);
+  if (e) {
+    Object.assign(e, updates);
+    events.emit('change');
+  }
 }
 
 export function getLatestEntries(): CacheEntry[] {

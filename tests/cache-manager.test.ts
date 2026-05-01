@@ -10,6 +10,8 @@ import {
   getEntryByPort,
   getEntryById,
   makeId,
+  updateEntry,
+  events,
 } from '../server/cache-manager.js';
 import type { CacheEntry } from '../server/cache-manager.js';
 
@@ -40,7 +42,7 @@ async function clearCache() {
     await removeEntry(e.id);
   }
   // Also free any reserved ports left over from a previous test
-  for (let p = 5174; p <= 5189; p++) {
+  for (let p = 5174; p <= 5273; p++) {
     await releasePort(p);
   }
 }
@@ -67,11 +69,11 @@ describe('allocatePort', () => {
 
   it('returns null when all ports are used (via reservations)', async () => {
     const reserved: number[] = [];
-    for (let p = 5174; p <= 5189; p++) {
+    for (let p = 5174; p <= 5273; p++) {
       const allocated = await allocatePort();
       if (allocated !== null) reserved.push(allocated);
     }
-    expect(reserved.length).toBe(16);
+    expect(reserved.length).toBe(100);
     expect(await allocatePort()).toBeNull();
     for (const p of reserved) await releasePort(p);
   });
@@ -87,6 +89,25 @@ describe('allocatePort', () => {
     await releasePort(a!);
     await releasePort(c!);
     await releasePort(reused!);
+  });
+
+  it('skips OS-blocked port and returns the next free one', async () => {
+    // Bind to port 5174 externally so the OS-level probe finds it busy
+    const net = await import('net');
+    const blocker = net.createServer();
+    await new Promise<void>((resolve, reject) => {
+      blocker.on('error', reject);
+      blocker.listen({ host: '127.0.0.1', port: 5174 }, () => resolve());
+    });
+
+    try {
+      const port = await allocatePort();
+      expect(port).not.toBe(5174);
+      expect(port).toBeGreaterThanOrEqual(5175);
+      if (port !== null) await releasePort(port);
+    } finally {
+      await new Promise<void>(resolve => blocker.close(() => resolve()));
+    }
   });
 });
 
@@ -182,5 +203,43 @@ describe('getEntryByPort', () => {
 
   it('returns undefined for unused port', () => {
     expect(getEntryByPort(9999)).toBeUndefined();
+  });
+});
+
+describe('SSE events emitter', () => {
+  beforeEach(async () => { await clearCache(); });
+
+  it('fires change on addEntry', async () => {
+    const handler = vi.fn();
+    events.on('change', handler);
+    await addEntry(makeEntry({ repo: 'sse-add' }));
+    expect(handler).toHaveBeenCalledTimes(1);
+    events.off('change', handler);
+  });
+
+  it('fires change on removeEntry', async () => {
+    await addEntry(makeEntry({ repo: 'sse-remove' }));
+    const handler = vi.fn();
+    events.on('change', handler);
+    await removeEntry(makeId('sse-remove', 'abcdef1234567890abcdef1234567890abcdef12'));
+    expect(handler).toHaveBeenCalledTimes(1);
+    events.off('change', handler);
+  });
+
+  it('fires change on updateEntry', async () => {
+    await addEntry(makeEntry({ repo: 'sse-update' }));
+    const handler = vi.fn();
+    events.on('change', handler);
+    updateEntry(makeId('sse-update', 'abcdef1234567890abcdef1234567890abcdef12'), { sha: 'updated' });
+    expect(handler).toHaveBeenCalledTimes(1);
+    events.off('change', handler);
+  });
+
+  it('does not fire change on updateEntry for non-existent id', async () => {
+    const handler = vi.fn();
+    events.on('change', handler);
+    updateEntry('nonexistent-id', { sha: 'noop' });
+    expect(handler).not.toHaveBeenCalled();
+    events.off('change', handler);
   });
 });

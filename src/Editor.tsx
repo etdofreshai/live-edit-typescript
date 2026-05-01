@@ -511,8 +511,35 @@ export default function Editor({ initialOwner, initialRepo, initialBranch, initi
   };
 
   useEffect(() => {
-    const interval = setInterval(() => { refreshCache().catch(() => {}); }, 5000);
-    return () => clearInterval(interval);
+    let es: EventSource | null = null;
+    let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+
+    const connect = () => {
+      es = new EventSource('/api/cache/stream');
+      es.onmessage = (ev) => {
+        try {
+          const newCache: CacheEntry[] = JSON.parse(ev.data);
+          setCache(prev => {
+            const strip = (entries: CacheEntry[]) => entries.map(({ lastAccessed, ...rest }) => rest);
+            const prevJson = JSON.stringify(strip(prev));
+            const newJson = JSON.stringify(strip(newCache));
+            return prevJson === newJson ? prev : newCache;
+          });
+        } catch {}
+      };
+      es.onerror = () => {
+        es?.close();
+        es = null;
+        refreshCache().catch(() => {});
+        reconnectTimer = setTimeout(connect, 5000);
+      };
+    };
+    connect();
+
+    return () => {
+      es?.close();
+      if (reconnectTimer) clearTimeout(reconnectTimer);
+    };
   }, []);
 
   // Poll transcript count for sidebar badge
