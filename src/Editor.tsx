@@ -11,7 +11,7 @@ import { LogModal } from './components/LogModal';
 import { RepoSelector } from './components/RepoSelector';
 import { StaticFileBrowser } from './components/StaticFileBrowser';
 import { TopBar } from './components/TopBar';
-import { Branch, CacheEntry, Commit, Repo } from './types';
+import { Branch, CacheEntry, Commit, CompareInfo, PullRequestResult, Repo } from './types';
 
 type StartMode = 'vite' | 'npm-dev';
 
@@ -26,6 +26,25 @@ interface PersistedState {
   // Info needed to auto-re-run after server restart
   lastRun?: { repo: string; sha: string; branch?: string; isLatest?: boolean } | null;
 }
+
+interface CurrentFile {
+  path: string;
+  content?: string;
+  binary?: boolean;
+}
+
+type RunResponse = CacheEntry & { error?: string };
+
+interface CacheFilesResponse {
+  files?: string[];
+  truncated?: boolean;
+}
+
+interface LogResponse {
+  log?: string;
+}
+
+const errorMessage = (error: unknown): string => error instanceof Error ? error.message : String(error);
 
 function loadPersistedState(): Partial<PersistedState> {
   try {
@@ -66,16 +85,16 @@ export default function Editor({ initialOwner, initialRepo, initialBranch, initi
   const [activeEntryId, setActiveEntryId] = useState<string | null>(hasUrlParams ? null : (saved.current.activeEntryId ?? null));
   const [files, setFiles] = useState<string[]>([]);
   const [filesTruncated, setFilesTruncated] = useState(false);
-  const [currentFile, setCurrentFile] = useState<{ path: string; content?: string; binary?: boolean } | null>(null);
+  const [currentFile, setCurrentFile] = useState<CurrentFile | null>(null);
   const [expandedDirs, setExpandedDirs] = useState<Set<string>>(new Set());
   const [restoringState, setRestoringState] = useState(true);
   const [urlUsedLatest, setUrlUsedLatest] = useState(initialCommit === 'latest');
   const [branchFrom, setBranchFrom] = useState<string | null>(null);
   const [newBranchName, setNewBranchName] = useState('');
   const [branchError, setBranchError] = useState('');
-  const [compareInfo, setCompareInfo] = useState<{ ahead: number; behind: number; defaultBranch: string } | null>(null);
+  const [compareInfo, setCompareInfo] = useState<CompareInfo | null>(null);
   const [prLoading, setPrLoading] = useState(false);
-  const [prResult, setPrResult] = useState<{ url: string; number: number } | null>(null);
+  const [prResult, setPrResult] = useState<PullRequestResult | null>(null);
   const [prError, setPrError] = useState('');
   const [showEnvModal, setShowEnvModal] = useState(false);
   const [showLogModal, setShowLogModal] = useState(false);
@@ -133,7 +152,7 @@ export default function Editor({ initialOwner, initialRepo, initialBranch, initi
           // Run latest commit on this branch (same as clicking "▶ Latest")
           if (activeEntry?.isLatest && activeEntry.repo === initialRepo && activeEntry.branch === initialBranch) return;
           setLoading('latest');
-          entry = await api('/api/run-latest', {
+          entry = await api<RunResponse>('/api/run-latest', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
@@ -147,7 +166,7 @@ export default function Editor({ initialOwner, initialRepo, initialBranch, initi
           // Run specific commit
           if (activeEntry?.sha === initialCommit) return;
           setLoading(initialCommit);
-          entry = await api('/api/run', {
+          entry = await api<RunResponse>('/api/run', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ 
@@ -166,8 +185,8 @@ export default function Editor({ initialOwner, initialRepo, initialBranch, initi
         
         await refreshCache();
         await showEntry(entry);
-      } catch (e: any) {
-        setError(e.message);
+      } catch (e: unknown) {
+        setError(errorMessage(e));
       } finally {
         setLoading('');
       }
@@ -239,9 +258,9 @@ export default function Editor({ initialOwner, initialRepo, initialBranch, initi
     if (entry.type === 'static') {
       setPreviewPort(null);
       try {
-        const result = await api(`/api/cache/${entry.id}/files`);
-        setFiles(result.files ?? result);
-        setFilesTruncated(!!result.truncated);
+        const result = await api<CacheFilesResponse | string[]>(`/api/cache/${entry.id}/files`);
+        setFiles(Array.isArray(result) ? result : result.files ?? []);
+        setFilesTruncated(!Array.isArray(result) && !!result.truncated);
       } catch {}
       setCurrentFile(null);
       setExpandedDirs(new Set());
@@ -252,7 +271,7 @@ export default function Editor({ initialOwner, initialRepo, initialBranch, initi
 
   const viewFile = async (cacheId: string, filePath: string) => {
     try {
-      const data = await api(`/api/cache/${cacheId}/files/${encodeURIComponent(filePath)}`);
+      const data = await api<CurrentFile>(`/api/cache/${cacheId}/files/${encodeURIComponent(filePath)}`);
       setCurrentFile(data);
     } catch {
       setCurrentFile({ path: filePath, binary: true });
@@ -263,7 +282,7 @@ export default function Editor({ initialOwner, initialRepo, initialBranch, initi
   useEffect(() => {
     const init = async () => {
       try {
-        const [repoList, cacheList] = await Promise.all([api('/api/repos'), api('/api/cache')]);
+        const [repoList, cacheList] = await Promise.all([api<Repo[]>('/api/repos'), api<CacheEntry[]>('/api/cache')]);
         setRepos(repoList);
         setCache(cacheList);
 
@@ -271,13 +290,13 @@ export default function Editor({ initialOwner, initialRepo, initialBranch, initi
         if (s.selectedRepo) {
           const repoExists = repoList.some((r: Repo) => r.name === s.selectedRepo);
           if (repoExists) {
-            const branchList = await api(`/api/repos/${s.selectedRepo}/branches`);
+            const branchList = await api<Branch[]>(`/api/repos/${s.selectedRepo}/branches`);
             setBranches(branchList);
 
             if (s.selectedBranch) {
               const branchExists = branchList.some((b: Branch) => b.name === s.selectedBranch);
               if (branchExists) {
-                const commitList = await api(`/api/repos/${s.selectedRepo}/branches/${encodeURIComponent(s.selectedBranch)}/commits`);
+                const commitList = await api<Commit[]>(`/api/repos/${s.selectedRepo}/branches/${encodeURIComponent(s.selectedBranch)}/commits`);
                 setCommits(commitList);
               } else {
                 setSelectedBranch('');
@@ -299,18 +318,18 @@ export default function Editor({ initialOwner, initialRepo, initialBranch, initi
             try {
               let entry;
               if (s.lastRun.isLatest && s.lastRun.branch) {
-                entry = await api('/api/run-latest', {
+                entry = await api<RunResponse>('/api/run-latest', {
                   method: 'POST', headers: { 'Content-Type': 'application/json' },
                   body: JSON.stringify({ repo: s.lastRun.repo, branch: s.lastRun.branch }),
                 });
               } else {
-                entry = await api('/api/run', {
+                entry = await api<RunResponse>('/api/run', {
                   method: 'POST', headers: { 'Content-Type': 'application/json' },
                   body: JSON.stringify({ repo: s.lastRun.repo, sha: s.lastRun.sha }),
                 });
               }
               if (entry && !entry.error) {
-                setCache(await api('/api/cache'));
+                setCache(await api<CacheEntry[]>('/api/cache'));
                 await showEntry(entry);
               } else {
                 setActiveEntryId(null);
@@ -326,8 +345,8 @@ export default function Editor({ initialOwner, initialRepo, initialBranch, initi
             setPreviewPort(null);
           }
         }
-      } catch (e: any) {
-        setError(e.message);
+      } catch (e: unknown) {
+        setError(errorMessage(e));
       } finally {
         setRestoringState(false);
       }
@@ -335,7 +354,7 @@ export default function Editor({ initialOwner, initialRepo, initialBranch, initi
     init();
   }, []);
 
-  const refreshCache = () => api('/api/cache').then((newCache: CacheEntry[]) => {
+  const refreshCache = () => api<CacheEntry[]>('/api/cache').then((newCache) => {
     setCache(prev => {
       // Compare ignoring volatile fields (lastAccessed changes on every request)
       const strip = (entries: CacheEntry[]) => entries.map(({ lastAccessed, ...rest }) => rest);
@@ -354,7 +373,7 @@ export default function Editor({ initialOwner, initialRepo, initialBranch, initi
     }
 
     try {
-      const branchList = await api(`/api/repos/${name}/branches`);
+      const branchList = await api<Branch[]>(`/api/repos/${name}/branches`);
       setBranches(branchList);
 
       // Auto-select branch: prefer one that's already running in cache, else default branch
@@ -381,9 +400,9 @@ export default function Editor({ initialOwner, initialRepo, initialBranch, initi
       if (!res.ok) { setBranchError(data.error || 'Failed to create branch'); return; }
       setBranchFrom(null);
       setNewBranchName('');
-      setBranches(await api(`/api/repos/${selectedRepo}/branches`));
+      setBranches(await api<Branch[]>(`/api/repos/${selectedRepo}/branches`));
       selectBranch(name);
-    } catch (e: any) { setBranchError(e.message); }
+    } catch (e: unknown) { setBranchError(errorMessage(e)); }
   };
 
   const selectBranch = async (branch: string) => {
@@ -399,8 +418,8 @@ export default function Editor({ initialOwner, initialRepo, initialBranch, initi
 
     try {
       const [commitList, cmp] = await Promise.all([
-        api(`/api/repos/${selectedRepo}/branches/${encodeURIComponent(branch)}/commits`),
-        api(`/api/repos/${selectedRepo}/branches/${encodeURIComponent(branch)}/compare`).catch(() => null),
+        api<Commit[]>(`/api/repos/${selectedRepo}/branches/${encodeURIComponent(branch)}/commits`),
+        api<CompareInfo & { error?: string }>(`/api/repos/${selectedRepo}/branches/${encodeURIComponent(branch)}/compare`).catch(() => null),
       ]);
       setCommits(commitList);
       if (cmp && !cmp.error) setCompareInfo(cmp);
@@ -413,7 +432,7 @@ export default function Editor({ initialOwner, initialRepo, initialBranch, initi
     setPrError('');
     setPrResult(null);
     try {
-      const res = await api(`/api/repos/${selectedRepo}/pulls`, {
+      const res = await api<PullRequestResult>(`/api/repos/${selectedRepo}/pulls`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -424,35 +443,35 @@ export default function Editor({ initialOwner, initialRepo, initialBranch, initi
       });
       if (res.error) { setPrError(res.error); return; }
       setPrResult(res);
-    } catch (e: any) { setPrError(e.message); }
+    } catch (e: unknown) { setPrError(errorMessage(e)); }
     finally { setPrLoading(false); }
   };
 
   const run = async (sha: string) => {
     setLoading(sha); setError(''); setSidebarOpen(false); setUrlUsedLatest(false);
     try {
-      const entry = await api('/api/run', {
+      const entry = await api<RunResponse>('/api/run', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ repo: selectedRepo, sha, envVars: parseEnvText(envText), startMode }),
       });
       if (entry.error) { setError(entry.error); return; }
       await refreshCache();
       await showEntry(entry);
-    } catch (e: any) { setError(e.message); }
+    } catch (e: unknown) { setError(errorMessage(e)); }
     finally { setLoading(''); }
   };
 
   const runLatest = async () => {
     setLoading('latest'); setError(''); setSidebarOpen(false); setUrlUsedLatest(true);
     try {
-      const entry = await api('/api/run-latest', {
+      const entry = await api<RunResponse>('/api/run-latest', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ repo: selectedRepo, branch: selectedBranch, envVars: parseEnvText(envText), startMode }),
       });
       if (entry.error) { setError(entry.error); return; }
       await refreshCache();
       await showEntry(entry);
-    } catch (e: any) { setError(e.message); }
+    } catch (e: unknown) { setError(errorMessage(e)); }
     finally { setLoading(''); }
   };
 
@@ -546,7 +565,7 @@ export default function Editor({ initialOwner, initialRepo, initialBranch, initi
   const refreshLog = async () => {
     if (!activeEntry) return;
     try {
-      const res = await api(`/api/cache/${activeEntry.id}/log`);
+      const res = await api<LogResponse>(`/api/cache/${activeEntry.id}/log`);
       setLogContent(res.log || '(no log output)');
     } catch {
       setLogContent('(failed to fetch log)');

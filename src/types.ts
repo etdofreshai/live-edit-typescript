@@ -35,6 +35,18 @@ export interface Commit {
   [key: string]: unknown;
 }
 
+export interface CompareInfo {
+  ahead: number;
+  behind: number;
+  defaultBranch: string;
+}
+
+export interface PullRequestResult {
+  url: string;
+  number: number;
+  error?: string;
+}
+
 export interface VoiceJob {
   id: string;
   status: 'transcribing' | 'sending' | 'sent' | 'error';

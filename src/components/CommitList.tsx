@@ -1,18 +1,7 @@
-import { Commit } from '../types';
+import { Commit, CompareInfo, PullRequestResult } from '../types';
 import { timeAgo } from '../utils';
 
 type StartMode = 'vite' | 'npm-dev';
-
-interface CompareInfo {
-  ahead: number;
-  behind: number;
-  defaultBranch: string;
-}
-
-interface PullRequestResult {
-  url: string;
-  number: number;
-}
 
 interface CommitListProps {
   commits: Commit[];
