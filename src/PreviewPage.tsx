@@ -2,18 +2,7 @@ import React, { useEffect, useState, useRef } from 'react';
 import { useParams } from 'react-router-dom';
 import './styles.css';
 
-interface CacheEntry {
-  id: string;
-  repo: string;
-  sha: string;
-  port: number;
-  lastAccessed: number;
-  branch?: string;
-  isLatest?: boolean;
-  commitMessage?: string;
-  commitDate?: string;
-  type?: 'vite' | 'static';
-}
+import { CacheEntry } from './types';
 
 const api = (path: string, opts?: RequestInit) => fetch(path, opts).then(r => r.json());
 

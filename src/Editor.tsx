@@ -4,12 +4,7 @@ import { VoiceButton } from './VoiceButton';
 import { IframeWithRetry } from './IframeWithRetry';
 import { TranscriptHistoryModal } from './TranscriptHistoryModal';
 
-interface CacheEntry {
-  id: string; repo: string; sha: string; port: number; lastAccessed: number;
-  branch?: string; isLatest?: boolean;
-  commitMessage?: string; commitDate?: string;
-  type?: 'vite' | 'static';
-}
+import { CacheEntry } from './types';
 
 type StartMode = 'vite' | 'npm-dev';
 
