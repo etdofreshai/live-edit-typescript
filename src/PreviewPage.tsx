@@ -7,6 +7,7 @@ import { api } from './api';
 import { IframeWithRetry } from './IframeWithRetry';
 
 const DEFAULT_OWNER = 'etdofreshai';
+type RunResponse = CacheEntry & { error?: string };
 
 export default function PreviewPage() {
   const { owner, repo, branch, commit } = useParams<{
@@ -38,7 +39,7 @@ export default function PreviewPage() {
 
         if (isLatest) {
           // Use run-latest for auto-refreshing tracking
-          const newEntry = await api('/api/run-latest', {
+          const newEntry = await api<RunResponse>('/api/run-latest', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
@@ -60,7 +61,7 @@ export default function PreviewPage() {
           setLoading(false);
         } else {
           // Specific commit
-          const cache = await api('/api/cache');
+          const cache = await api<CacheEntry[]>('/api/cache');
           const existing = cache.find((e: CacheEntry) =>
             e.owner === resolvedOwner && e.repo === repo && e.sha === commit
           );
@@ -71,7 +72,7 @@ export default function PreviewPage() {
             return;
           }
 
-          const newEntry = await api('/api/run', {
+          const newEntry = await api<RunResponse>('/api/run', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
