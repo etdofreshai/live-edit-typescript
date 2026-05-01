@@ -1,4 +1,5 @@
 import { execFileSync, spawn } from 'child_process';
+import type { ExecFileSyncOptions, ExecFileSyncOptionsWithStringEncoding } from 'child_process';
 import { createWriteStream, existsSync, mkdirSync, rmSync, readFileSync, writeFileSync } from 'fs';
 import type { WriteStream } from 'fs';
 import os from 'os';
@@ -21,6 +22,30 @@ export function buildCloneArgs(
     return ['clone', '--depth', '50', '--single-branch', '-b', opts.branch, url, dir];
   }
   return ['clone', '--depth', '50', url, dir];
+}
+
+export const GIT_TIMEOUTS_MS = {
+  cloneFetch: 120_000,
+  local: 30_000,
+} as const;
+
+export function getGitTimeoutMs(args: string[]): number {
+  const command = args[0];
+  return command === 'clone' || command === 'fetch'
+    ? GIT_TIMEOUTS_MS.cloneFetch
+    : GIT_TIMEOUTS_MS.local;
+}
+
+export function runGit(args: string[], options: ExecFileSyncOptionsWithStringEncoding): string;
+export function runGit(args: string[], options?: ExecFileSyncOptions): Buffer;
+export function runGit(
+  args: string[],
+  options: ExecFileSyncOptions | ExecFileSyncOptionsWithStringEncoding = {}
+): Buffer | string {
+  return execFileSync('git', args, {
+    ...options,
+    timeout: options.timeout ?? getGitTimeoutMs(args),
+  }) as Buffer | string;
 }
 
 export function getSharedNpmCache(): string {
@@ -156,8 +181,8 @@ export async function cloneAndStart(
   try {
     if (!existsSync(dir)) {
       const cloneUrl = `https://github.com/${safeOwner}/${safeRepo}.git`;
-      execFileSync('git', buildCloneArgs(cloneUrl, dir, { branch: safeBranch, isLatest: opts?.isLatest }), { stdio: 'pipe' });
-      execFileSync('git', ['checkout', safeSha], { cwd: dir, stdio: 'pipe' });
+      runGit(buildCloneArgs(cloneUrl, dir, { branch: safeBranch, isLatest: opts?.isLatest }), { stdio: 'pipe' });
+      runGit(['checkout', safeSha], { cwd: dir, stdio: 'pipe' });
       createdDir = true;
     }
 
@@ -299,23 +324,23 @@ export async function pullLatest(entry: CacheEntry, newSha: string): Promise<{ c
   const branch = validateBranch(entry.branch);
   assertInsideTargets(entry.dir);
   const oldSha = validateSha(entry.sha);
-  execFileSync('git', ['fetch', '--depth', '50', 'origin', branch], { cwd: entry.dir, stdio: 'pipe' });
+  runGit(['fetch', '--depth', '50', 'origin', branch], { cwd: entry.dir, stdio: 'pipe' });
   let changedFiles: string[];
   try {
-    changedFiles = execFileSync('git', ['diff', '--name-only', `${oldSha}..${newSha}`], {
+    changedFiles = runGit(['diff', '--name-only', `${oldSha}..${newSha}`], {
       cwd: entry.dir,
       encoding: 'utf-8',
       stdio: ['ignore', 'pipe', 'pipe'],
     }).split(/\r?\n/).filter(Boolean);
-    execFileSync('git', ['reset', '--hard', `origin/${branch}`], { cwd: entry.dir, stdio: 'pipe' });
+    runGit(['reset', '--hard', `origin/${branch}`], { cwd: entry.dir, stdio: 'pipe' });
   } catch {
-    execFileSync('git', ['fetch', '--unshallow', 'origin', branch], { cwd: entry.dir, stdio: 'pipe' });
-    changedFiles = execFileSync('git', ['diff', '--name-only', `${oldSha}..${newSha}`], {
+    runGit(['fetch', '--unshallow', 'origin', branch], { cwd: entry.dir, stdio: 'pipe' });
+    changedFiles = runGit(['diff', '--name-only', `${oldSha}..${newSha}`], {
       cwd: entry.dir,
       encoding: 'utf-8',
       stdio: ['ignore', 'pipe', 'pipe'],
     }).split(/\r?\n/).filter(Boolean);
-    execFileSync('git', ['reset', '--hard', `origin/${branch}`], { cwd: entry.dir, stdio: 'pipe' });
+    runGit(['reset', '--hard', `origin/${branch}`], { cwd: entry.dir, stdio: 'pipe' });
   }
   // Quick npm install in case deps changed
   try {

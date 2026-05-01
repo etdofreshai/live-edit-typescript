@@ -2,7 +2,7 @@ import { mkdtempSync, rmSync } from 'fs';
 import os from 'os';
 import path from 'path';
 import { afterEach, describe, expect, it } from 'vitest';
-import { buildCloneArgs, getSharedNpmCache } from '../server/runner.js';
+import { GIT_TIMEOUTS_MS, buildCloneArgs, getGitTimeoutMs, getSharedNpmCache } from '../server/runner.js';
 
 describe('buildCloneArgs', () => {
   it('uses a shallow single-branch clone for latest branch entries', () => {
@@ -33,6 +33,21 @@ describe('buildCloneArgs', () => {
       'https://github.com/owner/repo.git',
       '/tmp/repo',
     ]);
+  });
+});
+
+describe('getGitTimeoutMs', () => {
+  it('uses longer timeouts for network git operations', () => {
+    expect(getGitTimeoutMs(['clone', '--depth', '50', 'https://github.com/owner/repo.git', '/tmp/repo']))
+      .toBe(GIT_TIMEOUTS_MS.cloneFetch);
+    expect(getGitTimeoutMs(['fetch', '--depth', '50', 'origin', 'main']))
+      .toBe(GIT_TIMEOUTS_MS.cloneFetch);
+  });
+
+  it('uses shorter timeouts for local git operations', () => {
+    expect(getGitTimeoutMs(['checkout', 'abc123'])).toBe(GIT_TIMEOUTS_MS.local);
+    expect(getGitTimeoutMs(['reset', '--hard', 'origin/main'])).toBe(GIT_TIMEOUTS_MS.local);
+    expect(getGitTimeoutMs(['diff', '--name-only', 'old..new'])).toBe(GIT_TIMEOUTS_MS.local);
   });
 });
 
