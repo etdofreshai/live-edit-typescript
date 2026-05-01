@@ -12,6 +12,7 @@ export function EnvModal({ selectedRepo, envText, onChangeEnvText, onSave, onClo
       <div style={{ background: '#1a1a2e', border: '1px solid #3a3a5e', borderRadius: 12, padding: 24, width: 600, maxWidth: '90vw', maxHeight: '80vh', overflow: 'auto' }} onClick={e => e.stopPropagation()}>
         <h3 style={{ marginTop: 0, color: '#cdd6f4' }}>.env — {selectedRepo}</h3>
         <p style={{ color: '#6b7280', fontSize: 12, margin: '0 0 12px' }}>One variable per line: <code style={{ color: '#89b4fa' }}>KEY=value</code>. Lines starting with <code style={{ color: '#6b7280' }}>#</code> are comments.</p>
+        <p style={{ color: '#93929b', fontSize: 11, margin: '0 0 10px', lineHeight: 1.4 }}>Values are stored in this browser&apos;s localStorage — avoid pasting highly sensitive production secrets.</p>
         <textarea
           value={envText}
           onChange={e => onChangeEnvText(e.target.value)}
