@@ -371,7 +371,7 @@ export default function Editor({ initialOwner, initialRepo, initialBranch, initi
   const refreshCache = () => api<CacheEntry[]>('/api/cache').then((newCache) => {
     setCache(prev => {
       // Compare ignoring volatile fields (lastAccessed changes on every request)
-      const strip = (entries: CacheEntry[]) => entries.map(({ lastAccessed, ...rest }) => rest);
+      const strip = (entries: CacheEntry[]) => entries.map(({ lastAccessed: _, ...rest }) => rest);
       const prevJson = JSON.stringify(strip(prev));
       const newJson = JSON.stringify(strip(newCache));
       return prevJson === newJson ? prev : newCache;
@@ -520,7 +520,7 @@ export default function Editor({ initialOwner, initialRepo, initialBranch, initi
         try {
           const newCache: CacheEntry[] = JSON.parse(ev.data);
           setCache(prev => {
-            const strip = (entries: CacheEntry[]) => entries.map(({ lastAccessed, ...rest }) => rest);
+            const strip = (entries: CacheEntry[]) => entries.map(({ lastAccessed: _, ...rest }) => rest);
             const prevJson = JSON.stringify(strip(prev));
             const newJson = JSON.stringify(strip(newCache));
             return prevJson === newJson ? prev : newCache;
@@ -577,9 +577,9 @@ export default function Editor({ initialOwner, initialRepo, initialBranch, initi
           error: iframeConsole.error,
         };
 
-        const addToBuffer = (level: string, args: any[]) => {
+        const addToBuffer = (level: string, args: unknown[]) => {
           const timestamp = new Date().toLocaleTimeString();
-          const message = `[${timestamp}] [${level}] ${args.map(arg => 
+          const message = `[${timestamp}] [${level}] ${args.map(arg =>
             typeof arg === 'object' ? JSON.stringify(arg) : String(arg)
           ).join(' ')}`;
           buffer.push(message);
@@ -587,21 +587,21 @@ export default function Editor({ initialOwner, initialRepo, initialBranch, initi
           setConsoleLogs([...buffer]);
         };
 
-        iframeConsole.log = function(...args: any[]) {
+        iframeConsole.log = function(...args: unknown[]) {
           addToBuffer('log', args);
           originalConsole.log.apply(this, args);
         };
 
-        iframeConsole.warn = function(...args: any[]) {
+        iframeConsole.warn = function(...args: unknown[]) {
           addToBuffer('warn', args);
           originalConsole.warn.apply(this, args);
         };
 
-        iframeConsole.error = function(...args: any[]) {
+        iframeConsole.error = function(...args: unknown[]) {
           addToBuffer('error', args);
           originalConsole.error.apply(this, args);
         };
-      } catch (e) {
+      } catch {
         // Cross-origin iframe - can't access contentWindow
         console.warn('Cannot intercept console logs: cross-origin iframe');
       }
@@ -617,7 +617,7 @@ export default function Editor({ initialOwner, initialRepo, initialBranch, initi
     return () => {
       iframe.removeEventListener('load', onLoad);
     };
-  }, [previewPort]); // eslint-disable-line -- iframeRef is stable
+  }, [previewPort]);
 
   const remove = async (id: string) => {
     try { await api(`/api/cache/${id}`, { method: 'DELETE' }); } catch {}

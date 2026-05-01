@@ -92,8 +92,8 @@ export default function PreviewPage() {
           setEntry(newEntry);
           setLoading(false);
         }
-      } catch (e: any) {
-        setError(e.message);
+      } catch (e: unknown) {
+        setError(e instanceof Error ? e.message : String(e));
         setLoading(false);
       }
     };

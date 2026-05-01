@@ -57,7 +57,7 @@ export function TranscriptHistoryModal({ onClose }: TranscriptHistoryModalProps)
       bottomRef.current.scrollIntoView({ behavior: firstLoadRef.current ? 'auto' : 'smooth' });
       firstLoadRef.current = false;
     }
-  }, [entries]); // eslint-disable-line
+  }, [entries]);
 
   const handleScroll = (e: React.UIEvent<HTMLDivElement>) => {
     const el = e.currentTarget;
