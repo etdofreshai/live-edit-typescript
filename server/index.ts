@@ -8,13 +8,16 @@ import multer from 'multer';
 // Using native FormData + Blob (Node 22)
 import { listRepos, listBranches, listCommits, getBranchHead, getCommit, createBranch, getDefaultBranch, compareBranches, createPullRequest, OWNER } from './github.js';
 import { getEntry, addEntry, evictIfNeeded, allocatePort, removeEntry, listEntries, makeId, getEntryByPort, getLatestEntries, updateEntry, getEntryById } from './cache-manager.js';
-import { cloneAndStart, getTargetDir, pullLatest, getServerLog } from './runner.js';
+import { cloneAndStart, getTargetDir, pullLatest, getServerLog, stopServer } from './runner.js';
 import { webhookRouter, registerWebhook, unregisterWebhook } from './webhook.js';
 
 import { execSync } from 'child_process';
 
 const app = express();
 app.use(cors());
+
+const packageInfo = JSON.parse(fs.readFileSync(pathModule.join(process.cwd(), 'package.json'), 'utf-8')) as { version?: string };
+const version = packageInfo.version || '0.0.0';
 
 // Git info for footer
 const gitInfo = (() => {
@@ -29,6 +32,10 @@ app.get('/api/info', (_req, res) => res.json(gitInfo));
 // Webhook route MUST come before express.json() — it needs raw body
 app.use(webhookRouter);
 app.use(express.json());
+
+app.get('/api/health', (_req, res) => {
+  res.json({ ok: true, version, uptime: Math.round(process.uptime()) });
+});
 
 // Multer configuration for voice uploads (audio + optional screenshot)
 const upload = multer({ storage: multer.memoryStorage() });
@@ -556,6 +563,8 @@ app.use('/proxy/:port', (req, res) => {
   proxy.web(req, res, { target: `http://localhost:${port}`, selfHandleResponse: true });
 });
 
+app.use(express.static(pathModule.join(process.cwd(), 'dist')));
+
 // SPA fallback - serve index.html for all other routes (must be last)
 // This allows React Router to handle client-side routing
 app.get('*', (req, res) => {
@@ -575,6 +584,7 @@ app.get('*', (req, res) => {
 });
 
 const server = http.createServer(app);
+let shuttingDown = false;
 
 // WebSocket upgrade for HMR — also keep prefix intact
 server.on('upgrade', (req, socket, head) => {
@@ -588,6 +598,27 @@ server.on('upgrade', (req, socket, head) => {
   }
   socket.destroy();
 });
+
+const shutdown = (signal: NodeJS.Signals) => {
+  if (shuttingDown) return;
+  shuttingDown = true;
+  console.log(`[shutdown] ${signal} received; closing API server and target processes`);
+
+  const forceExit = setTimeout(() => {
+    console.error('[shutdown] timed out; exiting');
+    process.exit(0);
+  }, 8000);
+  forceExit.unref();
+
+  const stopTargets = Promise.allSettled(listEntries().map(entry => stopServer(entry)));
+  server.close(async () => {
+    await stopTargets;
+    process.exit(0);
+  });
+};
+
+process.on('SIGTERM', shutdown);
+process.on('SIGINT', shutdown);
 
 server.listen(3000, () => {
   console.log('API server on :3000');
