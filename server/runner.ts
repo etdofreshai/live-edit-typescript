@@ -1,13 +1,13 @@
-import { execSync, spawn } from 'child_process';
+import { execFileSync, execSync, spawn } from 'child_process';
 import { existsSync, rmSync, readFileSync, openSync, closeSync, writeFileSync } from 'fs';
 import path from 'path';
 import type { CacheEntry } from './cache-manager.js';
 import { OWNER } from './github.js';
-
-const TARGETS_DIR = path.resolve(process.cwd(), 'targets');
+import { assertInsideTargets, safeTargetSubdir } from './path-safety.js';
+import { validateBranch, validateRepo, validateSha } from './validators.js';
 
 export function getTargetDir(repo: string, sha: string): string {
-  return path.join(TARGETS_DIR, `${repo}-${sha.slice(0, 7)}`);
+  return safeTargetSubdir(repo, sha);
 }
 
 export async function cloneAndStart(
@@ -21,16 +21,19 @@ export async function cloneAndStart(
     startMode?: 'vite' | 'npm-dev';
   }
 ): Promise<{ dir: string; pid: number; type: 'vite' | 'static' }> {
-  const dir = getTargetDir(repo, sha);
+  const safeRepo = validateRepo(repo);
+  const safeSha = validateSha(sha);
+  if (opts?.branch) validateBranch(opts.branch);
+  const dir = safeTargetSubdir(safeRepo, safeSha);
 
   if (!existsSync(dir)) {
-    const cloneUrl = `https://github.com/${OWNER}/${repo}.git`;
+    const cloneUrl = `https://github.com/${OWNER}/${safeRepo}.git`;
     if (opts?.isLatest) {
-      execSync(`git clone ${cloneUrl} ${dir}`, { stdio: 'pipe' });
-      execSync(`git checkout ${sha}`, { cwd: dir, stdio: 'pipe' });
+      execFileSync('git', ['clone', cloneUrl, dir], { stdio: 'pipe' });
+      execFileSync('git', ['checkout', safeSha], { cwd: dir, stdio: 'pipe' });
     } else {
-      execSync(`git clone --depth 50 ${cloneUrl} ${dir}`, { stdio: 'pipe' });
-      execSync(`git checkout ${sha}`, { cwd: dir, stdio: 'pipe' });
+      execFileSync('git', ['clone', '--depth', '50', cloneUrl, dir], { stdio: 'pipe' });
+      execFileSync('git', ['checkout', safeSha], { cwd: dir, stdio: 'pipe' });
     }
   }
 
@@ -144,9 +147,13 @@ export default defineConfig({
 }
 
 export async function pullLatest(entry: CacheEntry, newSha: string) {
+  validateRepo(entry.repo);
+  validateSha(newSha);
   if (!entry.branch) return;
-  execSync(`git fetch origin ${entry.branch}`, { cwd: entry.dir, stdio: 'pipe' });
-  execSync(`git reset --hard origin/${entry.branch}`, { cwd: entry.dir, stdio: 'pipe' });
+  const branch = validateBranch(entry.branch);
+  assertInsideTargets(entry.dir);
+  execFileSync('git', ['fetch', 'origin', branch], { cwd: entry.dir, stdio: 'pipe' });
+  execFileSync('git', ['reset', '--hard', `origin/${branch}`], { cwd: entry.dir, stdio: 'pipe' });
   // Quick npm install in case deps changed
   try {
     execSync('npm install', { cwd: entry.dir, stdio: 'pipe', timeout: 60_000 });
@@ -174,6 +181,7 @@ export function getServerLog(dir: string): string {
 
 export async function removeFiles(dir: string) {
   try {
+    assertInsideTargets(dir);
     rmSync(dir, { recursive: true, force: true });
   } catch {}
 }
