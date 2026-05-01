@@ -48,14 +48,17 @@ const gitInfo = (() => {
 app.get('/api/info', (_req, res) => res.json(gitInfo));
 // Webhook route MUST come before express.json() — it needs raw body
 app.use(webhookRouter);
-app.use(express.json());
+app.use(express.json({ limit: '1mb' }));
 
 app.get('/api/health', (_req, res) => {
   res.json({ ok: true, version, uptime: Math.round(process.uptime()) });
 });
 
 // Multer configuration for voice uploads (audio + optional screenshot)
-const upload = multer({ storage: multer.memoryStorage() });
+const upload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 10 * 1024 * 1024, files: 4, fields: 20 },
+});
 
 // Single reusable proxy instance
 const proxy = httpProxy.createProxyServer({ ws: true, changeOrigin: true });
