@@ -12,6 +12,7 @@ import { cloneAndStart, pullLatest, getServerLog, stopServer } from './runner.js
 import { webhookRouter, registerWebhook, unregisterWebhook } from './webhook.js';
 import { assertInsideTargets } from './path-safety.js';
 import { validateBranch, validateRepo, validateSha } from './validators.js';
+import { walkBounded } from './file-walk.js';
 
 import { execFileSync } from 'child_process';
 
@@ -268,7 +269,7 @@ app.delete('/api/cache/:id', async (req, res) => {
 });
 
 // File explorer endpoints for static repos
-app.get('/api/cache/:id/files', (req, res) => {
+app.get('/api/cache/:id/files', async (req, res) => {
   const entry = getEntryById(req.params.id);
   if (!entry) return res.status(404).json({ error: 'Not found' });
   try {
@@ -277,23 +278,9 @@ app.get('/api/cache/:id/files', (req, res) => {
     return res.status(400).json({ error: validationMessage(e) });
   }
 
-  const files: string[] = [];
-  const walk = (dir: string, prefix: string) => {
-    for (const item of fs.readdirSync(dir, { withFileTypes: true })) {
-      if (item.name === '.git' || item.name === 'node_modules') continue;
-      const rel = prefix ? `${prefix}/${item.name}` : item.name;
-      if (item.isDirectory()) {
-        files.push(rel + '/');
-        walk(pathModule.join(dir, item.name), rel);
-      } else {
-        files.push(rel);
-      }
-    }
-  };
   try {
-    walk(entry.dir, '');
-    files.sort();
-    res.json(files);
+    const result = await walkBounded(entry.dir);
+    res.json(result);
   } catch (e: any) {
     res.status(500).json({ error: e.message });
   }
