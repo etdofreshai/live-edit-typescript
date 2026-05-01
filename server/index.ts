@@ -7,7 +7,7 @@ import pathModule from 'path';
 import multer from 'multer';
 // Using native FormData + Blob (Node 22)
 import { listRepos, listBranches, listCommits, getBranchHead, getCommit, createBranch, getDefaultBranch, compareBranches, createPullRequest, OWNER } from './github.js';
-import { getEntry, addEntry, allocatePort, removeEntry, listEntries, makeId, getEntryByPort, getLatestEntries, updateEntry, getEntryById } from './cache-manager.js';
+import { getEntry, addEntry, allocatePort, releasePort, removeEntry, listEntries, makeId, getEntryByPort, getLatestEntries, updateEntry, getEntryById } from './cache-manager.js';
 import { cloneAndStart, pullLatest, getServerLog, stopServer } from './runner.js';
 import { webhookRouter, registerWebhook, unregisterWebhook } from './webhook.js';
 import { assertInsideTargets } from './path-safety.js';
@@ -200,24 +200,30 @@ app.post('/api/run', async (req, res) => {
     const port = await allocatePort();
     if (!port) throw new Error('No ports available');
 
-    const [{ dir, pid, type }, commitInfo] = await Promise.all([
-      cloneAndStart(repo, sha, port, { envVars, startMode }),
-      getCommit(repo, sha).catch(() => ({ message: '', date: '' })),
-    ]);
-    const entry: CacheEntry = {
-      id: makeId(repo, sha),
-      repo,
-      sha,
-      port: type === 'static' ? 0 : port,
-      dir,
-      lastAccessed: Date.now(),
-      pid,
-      type,
-      commitMessage: commitInfo.message,
-      commitDate: commitInfo.date,
-    };
-    await addEntry(entry);
-    return entry;
+    try {
+      const [{ dir, pid, type }, commitInfo] = await Promise.all([
+        cloneAndStart(repo, sha, port, { envVars, startMode }),
+        getCommit(repo, sha).catch(() => ({ message: '', date: '' })),
+      ]);
+      const entry: CacheEntry = {
+        id: makeId(repo, sha),
+        repo,
+        sha,
+        port: type === 'static' ? 0 : port,
+        dir,
+        lastAccessed: Date.now(),
+        pid,
+        type,
+        commitMessage: commitInfo.message,
+        commitDate: commitInfo.date,
+      };
+      if (type === 'static') await releasePort(port);
+      await addEntry(entry);
+      return entry;
+    } catch (e) {
+      await releasePort(port);
+      throw e;
+    }
   })();
   inflight.set(inflightKey, promise);
   try {
@@ -270,21 +276,28 @@ app.post('/api/run-latest', async (req, res) => {
     const port = await allocatePort();
     if (!port) throw new Error('No ports available');
 
-    const [{ dir, pid, type }, commitInfo] = await Promise.all([
-      cloneAndStart(repo, sha, port, { branch, isLatest: true, envVars, startMode }),
-      getCommit(repo, sha).catch(() => ({ message: '', date: '' })),
-    ]);
-    const entry: CacheEntry = {
-      id: makeId(repo, sha),
-      repo, sha, port, dir, pid,
-      lastAccessed: Date.now(),
-      branch,
-      isLatest: true,
-      type,
-      commitMessage: commitInfo.message,
-      commitDate: commitInfo.date,
-    };
-    await addEntry(entry);
+    let entry: CacheEntry;
+    try {
+      const [{ dir, pid, type }, commitInfo] = await Promise.all([
+        cloneAndStart(repo, sha, port, { branch, isLatest: true, envVars, startMode }),
+        getCommit(repo, sha).catch(() => ({ message: '', date: '' })),
+      ]);
+      entry = {
+        id: makeId(repo, sha),
+        repo, sha, port: type === 'static' ? 0 : port, dir, pid,
+        lastAccessed: Date.now(),
+        branch,
+        isLatest: true,
+        type,
+        commitMessage: commitInfo.message,
+        commitDate: commitInfo.date,
+      };
+      if (type === 'static') await releasePort(port);
+      await addEntry(entry);
+    } catch (e) {
+      await releasePort(port);
+      throw e;
+    }
 
     // Auto-register webhook for this repo
     registerWebhook(repo, webhookUrl);
