@@ -12,6 +12,37 @@ const WEBHOOK_SECRET = configuredWebhookSecret || (isProduction ? undefined : 'd
 const TOKEN = process.env.GITHUB_TOKEN;
 const registeredWebhookRepos = new Set<string>();
 
+type GitHubPushPayload = {
+  ref?: string;
+  repository?: {
+    name?: string;
+    owner?: {
+      login?: string;
+    };
+  };
+  organization?: {
+    login?: string;
+  };
+};
+type GitHubHook = {
+  id?: number;
+  config?: {
+    url?: string;
+  };
+};
+
+function errorMessage(e: unknown): string {
+  return e instanceof Error ? e.message : String(e ?? '');
+}
+
+function toGitHubPushPayload(value: unknown): GitHubPushPayload {
+  return typeof value === 'object' && value !== null ? value as GitHubPushPayload : {};
+}
+
+function toGitHubHooks(value: unknown): GitHubHook[] {
+  return Array.isArray(value) ? value as GitHubHook[] : [];
+}
+
 if (!configuredWebhookSecret) {
   if (isProduction) {
     console.warn('[webhook] WEBHOOK_SECRET is not configured; webhook requests will return 503');
@@ -102,9 +133,9 @@ webhookRouter.post('/api/webhook', raw({ type: 'application/json' }), async (req
     return res.status(401).json({ error: 'Invalid signature' });
   }
 
-  let payload: any;
+  let payload: GitHubPushPayload;
   try {
-    payload = JSON.parse(body.toString());
+    payload = toGitHubPushPayload(JSON.parse(body.toString()));
   } catch {
     return res.status(400).json({ error: 'Invalid JSON' });
   }
@@ -135,8 +166,8 @@ webhookRouter.post('/api/webhook', raw({ type: 'application/json' }), async (req
         console.log(`[webhook] ${entry.repo}/${entry.branch}: ${entry.sha.slice(0, 7)} → ${headSha.slice(0, 7)}`);
         await refreshLatestEntry(entry, headSha);
       }
-    } catch (e: any) {
-      console.error(`[webhook] Error updating ${entry.repo}/${entry.branch}:`, e.message);
+    } catch (e: unknown) {
+      console.error(`[webhook] Error updating ${entry.repo}/${entry.branch}:`, errorMessage(e));
     }
   }
 
@@ -176,8 +207,8 @@ export async function registerWebhook(owner: string, repo: string, webhookUrl: s
     // Check existing hooks
     const listRes = await fetch(`https://api.github.com/repos/${safeOwner}/${safeRepo}/hooks`, { headers });
     if (listRes.ok) {
-      const hooks = await listRes.json() as any[];
-      if (hooks.some((h: any) => h.config?.url === webhookUrl)) {
+      const hooks = toGitHubHooks(await listRes.json());
+      if (hooks.some(h => h.config?.url === webhookUrl)) {
         console.log(`[webhook] Hook already exists for ${repoKey}`);
         registeredWebhookRepos.add(repoKey);
         return;
@@ -206,8 +237,8 @@ export async function registerWebhook(owner: string, repo: string, webhookUrl: s
     } else {
       console.warn(`[webhook] Failed to register hook for ${safeOwner}/${safeRepo}: ${createRes.status}`);
     }
-  } catch (e: any) {
-    console.error(`[webhook] Registration error for ${owner}/${repo}:`, e.message);
+  } catch (e: unknown) {
+    console.error(`[webhook] Registration error for ${owner}/${repo}:`, errorMessage(e));
   }
 }
 
@@ -237,8 +268,8 @@ export async function unregisterWebhook(owner: string, repo: string): Promise<vo
     const listRes = await fetch(`https://api.github.com/repos/${safeOwner}/${safeRepo}/hooks`, { headers });
     if (!listRes.ok) return;
 
-    const hooks = await listRes.json() as any[];
-    const hook = hooks.find((h: any) => h.config?.url === webhookUrl);
+    const hooks = toGitHubHooks(await listRes.json());
+    const hook = hooks.find(h => h.config?.url === webhookUrl);
     if (!hook) return;
 
     const delRes = await fetch(`https://api.github.com/repos/${safeOwner}/${safeRepo}/hooks/${hook.id}`, {
@@ -251,7 +282,7 @@ export async function unregisterWebhook(owner: string, repo: string): Promise<vo
     } else {
       console.warn(`[webhook] Failed to remove hook for ${safeOwner}/${safeRepo}: ${delRes.status}`);
     }
-  } catch (e: any) {
-    console.error(`[webhook] Unregister error for ${owner}/${repo}:`, e.message);
+  } catch (e: unknown) {
+    console.error(`[webhook] Unregister error for ${owner}/${repo}:`, errorMessage(e));
   }
 }
