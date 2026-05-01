@@ -7,7 +7,7 @@ import pathModule from 'path';
 import multer from 'multer';
 // Using native FormData + Blob (Node 22)
 import { listRepos, listBranches, listCommits, getBranchHead, getCommit, createBranch, getDefaultBranch, compareBranches, createPullRequest, OWNER } from './github.js';
-import { getEntry, addEntry, evictIfNeeded, allocatePort, removeEntry, listEntries, makeId, getEntryByPort, getLatestEntries, updateEntry, getEntryById } from './cache-manager.js';
+import { getEntry, addEntry, allocatePort, removeEntry, listEntries, makeId, getEntryByPort, getLatestEntries, updateEntry, getEntryById } from './cache-manager.js';
 import { cloneAndStart, pullLatest, getServerLog, stopServer } from './runner.js';
 import { webhookRouter, registerWebhook, unregisterWebhook } from './webhook.js';
 import { assertInsideTargets } from './path-safety.js';
@@ -197,9 +197,7 @@ app.post('/api/run', async (req, res) => {
     const existing = getEntry(repo, sha);
     if (existing) return existing;
 
-    await evictIfNeeded();
-
-    const port = allocatePort();
+    const port = await allocatePort();
     if (!port) throw new Error('No ports available');
 
     const [{ dir, pid, type }, commitInfo] = await Promise.all([
@@ -218,7 +216,7 @@ app.post('/api/run', async (req, res) => {
       commitMessage: commitInfo.message,
       commitDate: commitInfo.date,
     };
-    addEntry(entry);
+    await addEntry(entry);
     return entry;
   })();
   inflight.set(inflightKey, promise);
@@ -269,8 +267,7 @@ app.post('/api/run-latest', async (req, res) => {
       return existing;
     }
 
-    await evictIfNeeded();
-    const port = allocatePort();
+    const port = await allocatePort();
     if (!port) throw new Error('No ports available');
 
     const [{ dir, pid, type }, commitInfo] = await Promise.all([
@@ -287,7 +284,7 @@ app.post('/api/run-latest', async (req, res) => {
       commitMessage: commitInfo.message,
       commitDate: commitInfo.date,
     };
-    addEntry(entry);
+    await addEntry(entry);
 
     // Auto-register webhook for this repo
     registerWebhook(repo, webhookUrl);
