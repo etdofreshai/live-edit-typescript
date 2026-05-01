@@ -286,7 +286,7 @@ app.get('/api/cache/:id/files', async (req, res) => {
   }
 });
 
-app.get('/api/cache/:id/files/*', (req, res) => {
+app.get('/api/cache/:id/files/*', async (req, res) => {
   const entry = getEntryById(req.params.id);
   if (!entry) return res.status(404).json({ error: 'Not found' });
 
@@ -297,10 +297,10 @@ app.get('/api/cache/:id/files/*', (req, res) => {
   try {
     assertInsideTargets(fullPath);
     if (!isInsideDir(fullPath, entry.dir)) throw new Error('path outside entry');
-    const stat = fs.statSync(fullPath);
+    const stat = await fs.promises.stat(fullPath);
     if (stat.size > 500_000) return res.json({ binary: true, path: filePath });
 
-    const buf = fs.readFileSync(fullPath);
+    const buf = await fs.promises.readFile(fullPath);
     // Check if binary by looking for null bytes in first 8KB
     const sample = buf.subarray(0, 8192);
     if (sample.includes(0)) return res.json({ binary: true, path: filePath });
