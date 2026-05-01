@@ -4,7 +4,7 @@ import './styles.css';
 
 import { CacheEntry } from './types';
 
-const api = (path: string, opts?: RequestInit) => fetch(path, opts).then(r => r.json());
+import { api } from './api';
 
 function IframeWithRetry({ port, cacheId }: { port: number; cacheId?: string }) {
   const [ready, setReady] = useState(false);

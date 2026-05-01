@@ -12,7 +12,7 @@ interface Repo {
   };
 }
 
-const api = (path: string) => fetch(path).then(r => r.json());
+import { api } from './api';
 
 function timeAgo(dateStr: string): string {
   const now = Date.now();
