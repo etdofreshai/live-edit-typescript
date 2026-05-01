@@ -4,12 +4,7 @@ import { VoiceButton } from './VoiceButton';
 import { IframeWithRetry } from './IframeWithRetry';
 import { TranscriptHistoryModal } from './TranscriptHistoryModal';
 
-interface CacheEntry {
-  id: string; repo: string; sha: string; port: number; lastAccessed: number;
-  branch?: string; isLatest?: boolean;
-  commitMessage?: string; commitDate?: string;
-  type?: 'vite' | 'static';
-}
+import { CacheEntry } from './types';
 
 type StartMode = 'vite' | 'npm-dev';
 
@@ -37,23 +32,8 @@ function savePersistedState(state: PersistedState) {
   try { localStorage.setItem(STORAGE_KEY, JSON.stringify(state)); } catch {}
 }
 
-const api = (path: string, opts?: RequestInit) => fetch(path, opts).then(r => r.json());
-
-function timeAgo(dateStr: string): string {
-  const now = Date.now();
-  const then = new Date(dateStr).getTime();
-  const sec = Math.floor((now - then) / 1000);
-  if (sec < 60) return 'just now';
-  const min = Math.floor(sec / 60);
-  if (min < 60) return `${min}m ago`;
-  const hr = Math.floor(min / 60);
-  if (hr < 24) return `${hr}h ago`;
-  const days = Math.floor(hr / 24);
-  if (days < 30) return `${days}d ago`;
-  const months = Math.floor(days / 30);
-  if (months < 12) return `${months}mo ago`;
-  return `${Math.floor(months / 12)}y ago`;
-}
+import { api } from './api';
+import { timeAgo } from './utils';
 
 interface EditorProps {
   initialOwner?: string;
@@ -251,8 +231,10 @@ export default function Editor({ initialOwner, initialRepo, initialBranch, initi
     setActiveEntryId(entry.id);
     if (entry.type === 'static') {
       setPreviewPort(null);
-      const fileList = await api(`/api/cache/${entry.id}/files`);
-      setFiles(fileList);
+      try {
+        const fileList = await api(`/api/cache/${entry.id}/files`);
+        setFiles(fileList);
+      } catch {}
       setCurrentFile(null);
       setExpandedDirs(new Set());
     } else {
@@ -357,24 +339,26 @@ export default function Editor({ initialOwner, initialRepo, initialBranch, initi
 
   const selectRepo = async (name: string) => {
     setSelectedRepo(name); setSelectedBranch(''); setCommits([]);
-    
+
     // Update URL immediately when repo is selected
     if (onNavigate) {
       onNavigate(`/edit/etdofreshai/${name}`);
     }
-    
-    const branchList = await api(`/api/repos/${name}/branches`);
-    setBranches(branchList);
 
-    // Auto-select branch: prefer one that's already running in cache, else default branch
-    const cachedEntry = cache.find(e => e.repo === name);
-    const cachedBranch = cachedEntry?.branch;
-    const defaultBranch = branchList.find((b: any) => b.name === 'main')?.name
-      || branchList.find((b: any) => b.name === 'master')?.name
-      || branchList[0]?.name;
-    const autoSelect = (cachedBranch && branchList.some((b: any) => b.name === cachedBranch))
-      ? cachedBranch : defaultBranch;
-    if (autoSelect) selectBranch(autoSelect);
+    try {
+      const branchList = await api(`/api/repos/${name}/branches`);
+      setBranches(branchList);
+
+      // Auto-select branch: prefer one that's already running in cache, else default branch
+      const cachedEntry = cache.find(e => e.repo === name);
+      const cachedBranch = cachedEntry?.branch;
+      const defaultBranch = branchList.find((b: any) => b.name === 'main')?.name
+        || branchList.find((b: any) => b.name === 'master')?.name
+        || branchList[0]?.name;
+      const autoSelect = (cachedBranch && branchList.some((b: any) => b.name === cachedBranch))
+        ? cachedBranch : defaultBranch;
+      if (autoSelect) selectBranch(autoSelect);
+    } catch {}
   };
 
   const handleCreateBranch = async (fromBranch: string, name: string) => {
@@ -399,18 +383,20 @@ export default function Editor({ initialOwner, initialRepo, initialBranch, initi
     setPrResult(null);
     setPrError('');
     setCompareInfo(null);
-    
+
     // Update URL when branch is selected
     if (onNavigate && selectedRepo) {
       onNavigate(`/edit/etdofreshai/${selectedRepo}/${branch}`);
     }
-    
-    const [commitList, cmp] = await Promise.all([
-      api(`/api/repos/${selectedRepo}/branches/${encodeURIComponent(branch)}/commits`),
-      api(`/api/repos/${selectedRepo}/branches/${encodeURIComponent(branch)}/compare`).catch(() => null),
-    ]);
-    setCommits(commitList);
-    if (cmp && !cmp.error) setCompareInfo(cmp);
+
+    try {
+      const [commitList, cmp] = await Promise.all([
+        api(`/api/repos/${selectedRepo}/branches/${encodeURIComponent(branch)}/commits`),
+        api(`/api/repos/${selectedRepo}/branches/${encodeURIComponent(branch)}/compare`).catch(() => null),
+      ]);
+      setCommits(commitList);
+      if (cmp && !cmp.error) setCompareInfo(cmp);
+    } catch {}
   };
 
   const handleCreatePR = async () => {
@@ -463,7 +449,7 @@ export default function Editor({ initialOwner, initialRepo, initialBranch, initi
   };
 
   useEffect(() => {
-    const interval = setInterval(refreshCache, 5000);
+    const interval = setInterval(() => { refreshCache().catch(() => {}); }, 5000);
     return () => clearInterval(interval);
   }, []);
 
@@ -544,8 +530,8 @@ export default function Editor({ initialOwner, initialRepo, initialBranch, initi
   }, [previewPort]); // eslint-disable-line -- iframeRef is stable
 
   const remove = async (id: string) => {
-    await api(`/api/cache/${id}`, { method: 'DELETE' });
-    refreshCache();
+    try { await api(`/api/cache/${id}`, { method: 'DELETE' }); } catch {}
+    refreshCache().catch(() => {});
   };
 
   return (

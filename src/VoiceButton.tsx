@@ -33,13 +33,7 @@ async function captureIframeScreenshot(iframe: HTMLIFrameElement): Promise<Blob 
   }
 }
 
-interface VoiceJob {
-  id: string;
-  status: 'transcribing' | 'sending' | 'sent' | 'error';
-  text: string;
-  startedAt: number;
-  error?: string;
-}
+import { VoiceJob } from './types';
 
 interface VoiceContext {
   owner?: string;
