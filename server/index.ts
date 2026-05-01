@@ -25,6 +25,7 @@ const packageInfo = JSON.parse(fs.readFileSync(pathModule.join(process.cwd(), 'p
 const version = packageInfo.version || '0.0.0';
 let warnedDevWebhookUrl = false;
 const inflight = new Map<string, Promise<CacheEntry>>();
+const ADMIN_TOKEN = process.env.ADMIN_TOKEN;
 
 type ErrorLike = { message?: string };
 type WildcardParams = express.Request['params'] & { 0?: string };
@@ -101,6 +102,20 @@ function validationMessage(e: unknown): string {
 function markLegacyOwner(res: express.Response) {
   res.setHeader('Deprecation', 'true');
   res.setHeader('Warning', `299 - "owner-less repository API routes are deprecated; using ${DEFAULT_OWNER}"`);
+}
+
+function hasAdminToken(req: express.Request): boolean {
+  if (!ADMIN_TOKEN) return true;
+
+  const authorization = req.get('authorization') || '';
+  if (authorization === `Bearer ${ADMIN_TOKEN}`) return true;
+
+  return req.get('x-admin-token') === ADMIN_TOKEN;
+}
+
+function requireAdmin(req: express.Request, res: express.Response, next: express.NextFunction) {
+  if (hasAdminToken(req)) return next();
+  return res.status(401).json({ error: 'Unauthorized' });
 }
 
 function isInsideDir(absPath: string, dir: string): boolean {
@@ -250,7 +265,7 @@ app.get('/api/repos/:repo/branches', async (req, res) => {
   }
 });
 
-app.post('/api/repos/:owner/:repo/branches', async (req, res) => {
+app.post('/api/repos/:owner/:repo/branches', requireAdmin, async (req, res) => {
   const { name, from } = req.body;
   if (!name || !from) return res.status(400).json({ error: 'name and from required' });
   try {
@@ -268,7 +283,7 @@ app.post('/api/repos/:owner/:repo/branches', async (req, res) => {
   }
 });
 
-app.post('/api/repos/:repo/branches', async (req, res) => {
+app.post('/api/repos/:repo/branches', requireAdmin, async (req, res) => {
   const { name, from } = req.body;
   if (!name || !from) return res.status(400).json({ error: 'name and from required' });
   try {
@@ -320,7 +335,7 @@ app.get('/api/repos/:repo/branches/:branch/compare', async (req, res) => {
   }
 });
 
-app.post('/api/repos/:owner/:repo/pulls', async (req, res) => {
+app.post('/api/repos/:owner/:repo/pulls', requireAdmin, async (req, res) => {
   const { head, base, title, body } = req.body;
   if (!head || !base || !title) return res.status(400).json({ error: 'head, base, and title required' });
   try {
@@ -336,7 +351,7 @@ app.post('/api/repos/:owner/:repo/pulls', async (req, res) => {
   }
 });
 
-app.post('/api/repos/:repo/pulls', async (req, res) => {
+app.post('/api/repos/:repo/pulls', requireAdmin, async (req, res) => {
   const { head, base, title, body } = req.body;
   if (!head || !base || !title) return res.status(400).json({ error: 'head, base, and title required' });
   try {
@@ -401,7 +416,7 @@ app.get('/api/cache/stream', (req, res) => {
   });
 });
 
-app.post('/api/run', async (req, res) => {
+app.post('/api/run', requireAdmin, async (req, res) => {
   const { envVars, startMode } = req.body;
   let owner: string;
   let repo: string;
@@ -471,7 +486,7 @@ app.post('/api/run', async (req, res) => {
   }
 });
 
-app.post('/api/run-latest', async (req, res) => {
+app.post('/api/run-latest', requireAdmin, async (req, res) => {
   const { envVars, startMode } = req.body;
   let owner: string;
   let repo: string;
@@ -553,14 +568,14 @@ app.post('/api/run-latest', async (req, res) => {
   }
 });
 
-app.get('/api/cache/:id/log', (req, res) => {
+app.get('/api/cache/:id/log', requireAdmin, (req, res) => {
   const entry = getEntryById(req.params.id);
   if (!entry) return res.status(404).json({ error: 'Entry not found' });
   const log = getServerLog(entry.dir);
   res.json({ log });
 });
 
-app.delete('/api/cache/:id', async (req, res) => {
+app.delete('/api/cache/:id', requireAdmin, async (req, res) => {
   const entry = getEntryById(req.params.id);
   const ok = await removeEntry(req.params.id);
   // Clean up webhook if this was a latest entry
@@ -571,7 +586,7 @@ app.delete('/api/cache/:id', async (req, res) => {
 });
 
 // File explorer endpoints for static repos
-app.get('/api/cache/:id/files', async (req, res) => {
+app.get('/api/cache/:id/files', requireAdmin, async (req, res) => {
   const entry = getEntryById(req.params.id);
   if (!entry) return res.status(404).json({ error: 'Not found' });
   try {
@@ -588,7 +603,7 @@ app.get('/api/cache/:id/files', async (req, res) => {
   }
 });
 
-app.get('/api/cache/:id/files/*', async (req, res) => {
+app.get('/api/cache/:id/files/*', requireAdmin, async (req, res) => {
   const entry = getEntryById(req.params.id);
   if (!entry) return res.status(404).json({ error: 'Not found' });
 
@@ -647,7 +662,7 @@ function addToHistory(entry: TranscriptEntry) {
   while (transcriptHistory.length > 100) transcriptHistory.shift();
 }
 
-app.get('/api/transcript-history', (_req, res) => {
+app.get('/api/transcript-history', requireAdmin, (_req, res) => {
   res.json(transcriptHistory.slice(-50));
 });
 
@@ -662,18 +677,18 @@ setInterval(() => {
 }, 5000);
 
 // GET /api/voice/jobs — poll current job states
-app.get('/api/voice/jobs', (_req, res) => {
+app.get('/api/voice/jobs', requireAdmin, (_req, res) => {
   res.json(Array.from(voiceJobs.values()));
 });
 
 // DELETE /api/voice/jobs/:id — dismiss a job
-app.delete('/api/voice/jobs/:id', (req, res) => {
+app.delete('/api/voice/jobs/:id', requireAdmin, (req, res) => {
   voiceJobs.delete(req.params.id);
   res.json({ ok: true });
 });
 
 // POST /api/voice — upload audio + optional screenshot, creates a job, processes async
-app.post('/api/voice', upload.fields([{ name: 'audio', maxCount: 1 }, { name: 'screenshot', maxCount: 1 }]), (req, res) => {
+app.post('/api/voice', requireAdmin, upload.fields([{ name: 'audio', maxCount: 1 }, { name: 'screenshot', maxCount: 1 }]), (req, res) => {
   const files = req.files as { [fieldname: string]: Express.Multer.File[] };
   if (!files?.audio?.[0]) return res.status(400).json({ error: 'No audio file provided' });
 
