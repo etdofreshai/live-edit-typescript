@@ -3,8 +3,10 @@ import './styles.css';
 import { VoiceButton } from './VoiceButton';
 import { IframeWithRetry } from './IframeWithRetry';
 import { TranscriptHistoryModal } from './TranscriptHistoryModal';
-
-import { CacheEntry } from './types';
+import { BranchList } from './components/BranchList';
+import { CommitList } from './components/CommitList';
+import { RepoSelector } from './components/RepoSelector';
+import { Branch, CacheEntry, Commit, Repo } from './types';
 
 type StartMode = 'vite' | 'npm-dev';
 
@@ -47,11 +49,11 @@ export default function Editor({ initialOwner, initialRepo, initialBranch, initi
   const saved = useRef(loadPersistedState());
   // If URL params are provided, don't restore preview state from localStorage
   const hasUrlParams = !!(initialRepo);
-  const [repos, setRepos] = useState<any[]>([]);
+  const [repos, setRepos] = useState<Repo[]>([]);
   const [selectedRepo, setSelectedRepo] = useState(initialRepo || saved.current.selectedRepo || '');
-  const [branches, setBranches] = useState<any[]>([]);
+  const [branches, setBranches] = useState<Branch[]>([]);
   const [selectedBranch, setSelectedBranch] = useState(initialBranch || saved.current.selectedBranch || '');
-  const [commits, setCommits] = useState<any[]>([]);
+  const [commits, setCommits] = useState<Commit[]>([]);
   const [cache, setCache] = useState<CacheEntry[]>([]);
   const [previewPort, setPreviewPort] = useState<number | null>(hasUrlParams ? null : (saved.current.previewPort ?? null));
   const [loading, setLoading] = useState('');
@@ -263,13 +265,13 @@ export default function Editor({ initialOwner, initialRepo, initialBranch, initi
 
         const s = saved.current;
         if (s.selectedRepo) {
-          const repoExists = repoList.some((r: any) => r.name === s.selectedRepo);
+          const repoExists = repoList.some((r: Repo) => r.name === s.selectedRepo);
           if (repoExists) {
             const branchList = await api(`/api/repos/${s.selectedRepo}/branches`);
             setBranches(branchList);
 
             if (s.selectedBranch) {
-              const branchExists = branchList.some((b: any) => b.name === s.selectedBranch);
+              const branchExists = branchList.some((b: Branch) => b.name === s.selectedBranch);
               if (branchExists) {
                 const commitList = await api(`/api/repos/${s.selectedRepo}/branches/${encodeURIComponent(s.selectedBranch)}/commits`);
                 setCommits(commitList);
@@ -354,10 +356,10 @@ export default function Editor({ initialOwner, initialRepo, initialBranch, initi
       // Auto-select branch: prefer one that's already running in cache, else default branch
       const cachedEntry = cache.find(e => e.repo === name);
       const cachedBranch = cachedEntry?.branch;
-      const defaultBranch = branchList.find((b: any) => b.name === 'main')?.name
-        || branchList.find((b: any) => b.name === 'master')?.name
+      const defaultBranch = branchList.find((b: Branch) => b.name === 'main')?.name
+        || branchList.find((b: Branch) => b.name === 'master')?.name
         || branchList[0]?.name;
-      const autoSelect = (cachedBranch && branchList.some((b: any) => b.name === cachedBranch))
+      const autoSelect = (cachedBranch && branchList.some((b: Branch) => b.name === cachedBranch))
         ? cachedBranch : defaultBranch;
       if (autoSelect) selectBranch(autoSelect);
     } catch {}
@@ -597,159 +599,38 @@ export default function Editor({ initialOwner, initialRepo, initialBranch, initi
         <h2><a href="/" style={{ color: 'inherit', textDecoration: 'none' }}>Live Edit TypeScript</a></h2>
         {error && <div className="error-banner">{error}</div>}
 
-        <h3>Repos</h3>
-        <div className="list-panel">
-          <div className="list-panel-scroll">
-            {repos.map((r: any) => (
-              <div key={r.name}
-                className={`list-item ${r.name === selectedRepo ? 'active' : ''}`}
-                style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}
-                onClick={() => selectRepo(r.name)}>
-                <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{r.name}</span>
-                <a
-                  href={`https://github.com/etdofreshai/${r.name}`}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  onClick={e => e.stopPropagation()}
-                  style={{ color: '#6b7280', fontSize: 11, textDecoration: 'none', flexShrink: 0, padding: '0 4px' }}
-                  title="View on GitHub"
-                >↗</a>
-              </div>
-            ))}
-          </div>
-        </div>
+        <RepoSelector repos={repos} selectedRepo={selectedRepo} onSelectRepo={selectRepo} />
 
-        {branches.length > 0 && <>
-          <h3>Branches — {selectedRepo}</h3>
-          <div className="list-panel">
-            <div className="list-panel-scroll">
-              {branches.map((b: any) => (
-                <div key={b.name}>
-                  <div
-                    className={`list-item ${b.name === selectedBranch ? 'active' : ''}`}
-                    style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}
-                    onClick={() => selectBranch(b.name)}>
-                    <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{b.name}</span>
-                    <div style={{ display: 'flex', gap: 2, flexShrink: 0 }}>
-                      <a
-                        href={`https://github.com/etdofreshai/${selectedRepo}/tree/${b.name}`}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        onClick={e => e.stopPropagation()}
-                        style={{ color: '#6b7280', fontSize: 11, textDecoration: 'none', padding: '0 4px' }}
-                        title="View on GitHub"
-                      >↗</a>
-                      <button
-                        onClick={(e) => { e.stopPropagation(); setBranchFrom(branchFrom === b.name ? null : b.name); setNewBranchName(`${b.name}-dev-${crypto.randomUUID().slice(0, 6)}`); setBranchError(''); }}
-                        style={{ background: 'none', border: 'none', color: '#6b7280', cursor: 'pointer', fontSize: 14, padding: '0 4px', flexShrink: 0, lineHeight: 1 }}
-                        title="Create branch from here"
-                      >⑂</button>
-                    </div>
-                  </div>
-                  {branchFrom === b.name && (
-                    <div style={{ padding: '4px 8px 8px', display: 'flex', gap: 4, alignItems: 'center' }}>
-                      <input
-                        autoFocus
-                        value={newBranchName}
-                        onChange={e => setNewBranchName(e.target.value)}
-                        onKeyDown={e => { if (e.key === 'Enter' && newBranchName.trim()) handleCreateBranch(b.name, newBranchName.trim()); if (e.key === 'Escape') setBranchFrom(null); }}
-                        placeholder="new-branch-name"
-                        style={{ flex: 1, background: '#1a1a2e', border: '1px solid #3a3a5e', borderRadius: 4, color: '#cdd6f4', padding: '3px 6px', fontSize: 12, outline: 'none', minWidth: 0 }}
-                        onClick={e => e.stopPropagation()}
-                      />
-                      <button
-                        onClick={(e) => { e.stopPropagation(); if (newBranchName.trim()) handleCreateBranch(b.name, newBranchName.trim()); }}
-                        style={{ background: '#a6e3a1', color: '#1a1a2e', border: 'none', borderRadius: 4, padding: '3px 8px', fontSize: 12, cursor: 'pointer', fontWeight: 600, flexShrink: 0 }}
-                      >Create</button>
-                    </div>
-                  )}
-                  {branchFrom === b.name && branchError && (
-                    <div style={{ padding: '0 8px 6px', color: '#f38ba8', fontSize: 11 }}>{branchError}</div>
-                  )}
-                </div>
-              ))}
-            </div>
-          </div>
-        </>}
+        <BranchList
+          branches={branches}
+          selectedRepo={selectedRepo}
+          selectedBranch={selectedBranch}
+          branchFrom={branchFrom}
+          newBranchName={newBranchName}
+          branchError={branchError}
+          onSelectBranch={selectBranch}
+          onSetBranchFrom={setBranchFrom}
+          onSetNewBranchName={setNewBranchName}
+          onSetBranchError={setBranchError}
+          onCreateBranch={handleCreateBranch}
+        />
 
-        {commits.length > 0 && <>
-          <h3 style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
-            <span>Commits — {selectedRepo} / {selectedBranch}</span>
-            {compareInfo && compareInfo.ahead > 0 && (
-              <span style={{ fontSize: 11, background: '#89b4fa22', color: '#89b4fa', padding: '2px 8px', borderRadius: 10, fontWeight: 500 }}>
-                {compareInfo.ahead} ahead
-              </span>
-            )}
-            {compareInfo && compareInfo.ahead > 0 && !prResult && (
-              <button
-                onClick={handleCreatePR}
-                disabled={prLoading}
-                style={{ fontSize: 11, background: '#a6e3a122', color: '#a6e3a1', border: '1px solid #a6e3a144', borderRadius: 6, padding: '2px 10px', cursor: 'pointer', fontWeight: 600 }}
-              >
-                {prLoading ? '…' : `🔀 PR → ${compareInfo.defaultBranch}`}
-              </button>
-            )}
-            {prResult && (
-              <a href={prResult.url} target="_blank" rel="noopener noreferrer"
-                style={{ fontSize: 11, color: '#a6e3a1', textDecoration: 'none' }}>
-                ✓ PR #{prResult.number}
-              </a>
-            )}
-            {prError && (
-              <span style={{ fontSize: 11, color: '#f38ba8' }}>{prError.slice(0, 80)}</span>
-            )}
-            <select
-              value={startMode}
-              onChange={e => saveStartMode(e.target.value as StartMode)}
-              style={{ fontSize: 11, background: '#1a1a2e', color: '#cdd6f4', border: '1px solid #3a3a5e', borderRadius: 6, padding: '2px 8px', cursor: 'pointer', marginLeft: 'auto' }}
-            >
-              <option value="vite">Vite</option>
-              <option value="npm-dev">npm run dev</option>
-            </select>
-            <button
-              onClick={() => setShowEnvModal(true)}
-              style={{ fontSize: 11, background: 'transparent', color: '#cdd6f4', border: '1px solid #3a3a5e', borderRadius: 6, padding: '2px 10px', cursor: 'pointer', fontWeight: 600 }}
-            >
-              ⚙️ Env
-            </button>
-          </h3>
-          <div className="list-panel">
-            <div className="list-panel-scroll tall">
-              <div className="latest-entry">
-                <div className="commit-info">
-                  <div className="latest-label">▶ Latest</div>
-                  <div className="latest-desc">Track {selectedBranch} — auto-updates on new commits</div>
-                </div>
-                <button className="btn-run green" onClick={runLatest} disabled={!!loading}>
-                  {loading === 'latest' ? <span className="spinner" /> : '▶ Run'}
-                </button>
-              </div>
-              {commits.map((c: any) => (
-                <div key={c.sha} className="commit-item">
-                  <div className="commit-info">
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
-                      <div className="commit-sha">{c.sha.slice(0, 7)}</div>
-                      <a
-                        href={`https://github.com/etdofreshai/${selectedRepo}/commit/${c.sha}`}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        style={{ color: '#6b7280', fontSize: 10, textDecoration: 'none' }}
-                        title="View on GitHub"
-                      >↗</a>
-                    </div>
-                    <div className="commit-msg">{c.commit?.message?.split('\n')[0]}</div>
-                    {c.commit?.author?.date && (
-                      <div style={{ color: '#6b7280', fontSize: 11 }} title={new Date(c.commit.author.date).toLocaleString()}>{timeAgo(c.commit.author.date)}</div>
-                    )}
-                  </div>
-                  <button className="btn-run" onClick={() => run(c.sha)} disabled={!!loading}>
-                    {loading === c.sha ? <span className="spinner" /> : '▶ Run'}
-                  </button>
-                </div>
-              ))}
-            </div>
-          </div>
-        </>}
+        <CommitList
+          commits={commits}
+          selectedRepo={selectedRepo}
+          selectedBranch={selectedBranch}
+          compareInfo={compareInfo}
+          prLoading={prLoading}
+          prResult={prResult}
+          prError={prError}
+          startMode={startMode}
+          loading={loading}
+          onCreatePR={handleCreatePR}
+          onSaveStartMode={saveStartMode}
+          onShowEnvModal={() => setShowEnvModal(true)}
+          onRunLatest={runLatest}
+          onRunCommit={run}
+        />
 
         <h3>Transcript History</h3>
         <button

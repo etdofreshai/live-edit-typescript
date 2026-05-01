@@ -11,6 +11,30 @@ export interface CacheEntry {
   type?: 'vite' | 'static';
 }
 
+export interface Repo {
+  name: string;
+  updated_at?: string;
+  [key: string]: unknown;
+}
+
+export interface Branch {
+  name: string;
+  [key: string]: unknown;
+}
+
+export interface Commit {
+  sha: string;
+  commit?: {
+    message?: string;
+    author?: {
+      date?: string;
+      [key: string]: unknown;
+    };
+    [key: string]: unknown;
+  };
+  [key: string]: unknown;
+}
+
 export interface VoiceJob {
   id: string;
   status: 'transcribing' | 'sending' | 'sent' | 'error';
