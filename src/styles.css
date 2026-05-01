@@ -576,3 +576,97 @@ body {
   padding: 1px 7px;
   flex-shrink: 0;
 }
+
+/* === Modals === */
+.modal-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.7);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+}
+.modal-dialog {
+  background: #1a1a2e;
+  border: 1px solid #3a3a5e;
+  border-radius: 12px;
+  padding: 24px;
+  max-width: 90vw;
+  max-height: 80vh;
+}
+.modal-dialog--env { width: 600px; overflow: auto; }
+.modal-dialog--log { width: 700px; display: flex; flex-direction: column; }
+
+.modal-title { margin: 0; color: var(--text-primary); }
+.modal-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 12px;
+}
+.modal-hint { color: #6b7280; font-size: 12px; margin: 0 0 12px; }
+.modal-hint code { color: var(--accent); }
+.modal-hint code.muted { color: inherit; }
+.modal-note { color: #93929b; font-size: 11px; margin: 0 0 10px; line-height: 1.4; }
+
+.modal-textarea {
+  width: 100%;
+  min-height: 250px;
+  background: #16161e;
+  border: 1px solid #3a3a5e;
+  border-radius: var(--radius-lg);
+  color: var(--text-primary);
+  padding: 12px 14px;
+  font-size: 13px;
+  font-family: "JetBrains Mono", "Fira Code", "Cascadia Code", monospace;
+  line-height: 1.6;
+  resize: vertical;
+  outline: none;
+  box-sizing: border-box;
+  tab-size: 2;
+}
+.modal-code {
+  flex: 1;
+  overflow: auto;
+  background: #16161e;
+  border: 1px solid #3a3a5e;
+  border-radius: var(--radius-lg);
+  padding: 12px 14px;
+  font-size: 12px;
+  color: var(--text-primary);
+  font-family: "JetBrains Mono", "Fira Code", monospace;
+  line-height: 1.5;
+  margin: 0;
+  white-space: pre-wrap;
+  word-break: break-all;
+}
+.modal-footer { display: flex; gap: 8px; justify-content: flex-end; margin-top: 12px; }
+.modal-btn {
+  background: transparent;
+  color: #6b7280;
+  border: 1px solid #3a3a5e;
+  border-radius: var(--radius);
+  padding: 6px 16px;
+  cursor: pointer;
+  font-size: 13px;
+}
+.modal-btn--primary {
+  background: var(--accent-green);
+  color: #1a1a2e;
+  border: none;
+  border-radius: var(--radius);
+  padding: 6px 20px;
+  cursor: pointer;
+  font-size: 13px;
+  font-weight: 600;
+}
+.modal-btn--refresh {
+  background: transparent;
+  color: var(--accent);
+  border: 1px solid #3a3a5e;
+  border-radius: var(--radius);
+  padding: 2px 10px;
+  cursor: pointer;
+  font-size: 12px;
+}
