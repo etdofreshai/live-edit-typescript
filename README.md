@@ -257,6 +257,7 @@ For full-stack:
 - **Target servers:** Ports 5174-5189, 10-slot LRU cache
 - **Proxy:** `http-proxy` — routes `/proxy/{port}/` to target Vite servers
 - **Webhooks:** Auto-registered on GitHub for "latest" tracking, 30s poll fallback
+- **Shared npm cache:** `LIVE_EDIT_NPM_CACHE` or the OS tmp dir caches npm registry metadata and tarballs only; each repo still installs into its own `node_modules` for lockfile isolation
 - **localStorage:** Persists repo/branch/preview state + env vars per repo
 
 ### Docker
