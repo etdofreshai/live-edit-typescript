@@ -1,5 +1,7 @@
 import { execFileSync, spawn } from 'child_process';
-import { existsSync, rmSync, readFileSync, openSync, closeSync, writeFileSync } from 'fs';
+import { createWriteStream, existsSync, mkdirSync, rmSync, readFileSync, writeFileSync } from 'fs';
+import type { WriteStream } from 'fs';
+import os from 'os';
 import path from 'path';
 import type { CacheEntry } from './cache-manager.js';
 import { OWNER } from './github.js';
@@ -9,6 +11,23 @@ import { waitForPort } from './wait-for-port.js';
 
 export function getTargetDir(repo: string, sha: string): string {
   return safeTargetSubdir(repo, sha);
+}
+
+export function buildCloneArgs(
+  url: string,
+  dir: string,
+  opts?: { branch?: string; isLatest?: boolean }
+): string[] {
+  if (opts?.isLatest && opts.branch) {
+    return ['clone', '--depth', '50', '--single-branch', '-b', opts.branch, url, dir];
+  }
+  return ['clone', '--depth', '50', url, dir];
+}
+
+export function getSharedNpmCache(): string {
+  const cacheDir = process.env.LIVE_EDIT_NPM_CACHE || path.join(os.tmpdir(), 'live-edit-npm-cache');
+  mkdirSync(cacheDir, { recursive: true });
+  return cacheDir;
 }
 
 const CHILD_ENV_ALLOWLIST = new Set([
@@ -51,13 +70,35 @@ function installDependencies(dir: string, env?: Record<string, string>) {
   const args = hasLockfile
     ? ['ci', '--ignore-scripts']
     : ['install', '--ignore-scripts', '--no-audit', '--no-fund'];
+  const npmCache = getSharedNpmCache();
+  const installEnv = {
+    ...env,
+    npm_config_cache: npmCache,
+    NPM_CONFIG_CACHE: npmCache,
+  };
 
   // Arbitrary preview repos must not run npm lifecycle scripts on the host by default.
   execFileSync('npm', args, {
     cwd: dir,
     stdio: 'pipe',
     timeout: 120_000,
-    ...(env ? { env } : {}),
+    env: installEnv,
+  });
+}
+
+async function openLogStream(logPath: string): Promise<WriteStream> {
+  const stream = createWriteStream(logPath, { flags: 'w' });
+  await new Promise<void>((resolve, reject) => {
+    stream.once('open', () => resolve());
+    stream.once('error', reject);
+  });
+  return stream;
+}
+
+async function closeLogStream(stream: WriteStream | undefined): Promise<void> {
+  if (!stream || stream.destroyed) return;
+  await new Promise<void>((resolve) => {
+    stream.end(() => resolve());
   });
 }
 
@@ -105,22 +146,17 @@ export async function cloneAndStart(
 ): Promise<{ dir: string; pid: number; type: 'vite' | 'static' }> {
   const safeRepo = validateRepo(repo);
   const safeSha = validateSha(sha);
-  if (opts?.branch) validateBranch(opts.branch);
+  const safeBranch = opts?.branch ? validateBranch(opts.branch) : undefined;
   const dir = safeTargetSubdir(safeRepo, safeSha);
   let createdDir = false;
-  let logFd: number | undefined;
+  let logStream: WriteStream | undefined;
   let child: ReturnType<typeof spawn> | undefined;
 
   try {
     if (!existsSync(dir)) {
       const cloneUrl = `https://github.com/${OWNER}/${safeRepo}.git`;
-      if (opts?.isLatest) {
-        execFileSync('git', ['clone', cloneUrl, dir], { stdio: 'pipe' });
-        execFileSync('git', ['checkout', safeSha], { cwd: dir, stdio: 'pipe' });
-      } else {
-        execFileSync('git', ['clone', '--depth', '50', cloneUrl, dir], { stdio: 'pipe' });
-        execFileSync('git', ['checkout', safeSha], { cwd: dir, stdio: 'pipe' });
-      }
+      execFileSync('git', buildCloneArgs(cloneUrl, dir, { branch: safeBranch, isLatest: opts?.isLatest }), { stdio: 'pipe' });
+      execFileSync('git', ['checkout', safeSha], { cwd: dir, stdio: 'pipe' });
       createdDir = true;
     }
 
@@ -200,13 +236,13 @@ export default defineConfig({
 
     // Capture stdout/stderr to a log file for debugging
     const logPath = path.join(dir, '.vite-server.log');
-    logFd = openSync(logPath, 'w');
+    logStream = await openLogStream(logPath);
 
     if (startMode === 'npm-dev') {
       // Use npm run dev
       child = spawn('npm', ['run', 'dev'], {
         cwd: dir,
-        stdio: ['ignore', logFd, logFd],
+        stdio: ['ignore', logStream, logStream],
         detached: true,
         env: viteEnv,
       });
@@ -215,7 +251,7 @@ export default defineConfig({
       const args = ['vite', '--config', '.live-edit-vite.config.ts', '--port', String(port), '--host', '0.0.0.0', '--strictPort', '--base', `/proxy/${port}/`];
       child = spawn('npx', args, {
         cwd: dir,
-        stdio: ['ignore', logFd, logFd],
+        stdio: ['ignore', logStream, logStream],
         detached: true,
         env: viteEnv,
       });
@@ -223,10 +259,9 @@ export default defineConfig({
 
     child.unref();
     child.on('exit', () => {
-      if (logFd !== undefined) {
-        try { closeSync(logFd); } catch {}
-        logFd = undefined;
-      }
+      const stream = logStream;
+      logStream = undefined;
+      closeLogStream(stream).catch(() => {});
     });
 
     let rejectStartup: (error: Error) => void = () => {};
@@ -247,9 +282,7 @@ export default defineConfig({
     return { dir, pid: child.pid!, type: 'vite' };
   } catch (e) {
     await terminateChild(child);
-    if (logFd !== undefined) {
-      try { closeSync(logFd); } catch {}
-    }
+    await closeLogStream(logStream);
     if (createdDir) {
       try { rmSync(dir, { recursive: true, force: true }); } catch {}
     }
@@ -264,13 +297,24 @@ export async function pullLatest(entry: CacheEntry, newSha: string): Promise<{ c
   const branch = validateBranch(entry.branch);
   assertInsideTargets(entry.dir);
   const oldSha = validateSha(entry.sha);
-  execFileSync('git', ['fetch', 'origin', branch], { cwd: entry.dir, stdio: 'pipe' });
-  const changedFiles = execFileSync('git', ['diff', '--name-only', `${oldSha}..${newSha}`], {
-    cwd: entry.dir,
-    encoding: 'utf-8',
-    stdio: ['ignore', 'pipe', 'pipe'],
-  }).split(/\r?\n/).filter(Boolean);
-  execFileSync('git', ['reset', '--hard', `origin/${branch}`], { cwd: entry.dir, stdio: 'pipe' });
+  execFileSync('git', ['fetch', '--depth', '50', 'origin', branch], { cwd: entry.dir, stdio: 'pipe' });
+  let changedFiles: string[];
+  try {
+    changedFiles = execFileSync('git', ['diff', '--name-only', `${oldSha}..${newSha}`], {
+      cwd: entry.dir,
+      encoding: 'utf-8',
+      stdio: ['ignore', 'pipe', 'pipe'],
+    }).split(/\r?\n/).filter(Boolean);
+    execFileSync('git', ['reset', '--hard', `origin/${branch}`], { cwd: entry.dir, stdio: 'pipe' });
+  } catch {
+    execFileSync('git', ['fetch', '--unshallow', 'origin', branch], { cwd: entry.dir, stdio: 'pipe' });
+    changedFiles = execFileSync('git', ['diff', '--name-only', `${oldSha}..${newSha}`], {
+      cwd: entry.dir,
+      encoding: 'utf-8',
+      stdio: ['ignore', 'pipe', 'pipe'],
+    }).split(/\r?\n/).filter(Boolean);
+    execFileSync('git', ['reset', '--hard', `origin/${branch}`], { cwd: entry.dir, stdio: 'pipe' });
+  }
   // Quick npm install in case deps changed
   try {
     const env = buildChildEnv({}, {
