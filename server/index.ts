@@ -14,7 +14,7 @@ import { webhookRouter, registerWebhook, unregisterWebhook } from './webhook.js'
 import { assertInsideTargets } from './path-safety.js';
 import { validateBranch, validateOwner, validateRepo, validateSha } from './validators.js';
 import { walkBounded } from './file-walk.js';
-import { isAdminAuthorized } from './admin-auth.js';
+import { createRequireAdmin } from './admin-middleware.js';
 import type { CacheEntry } from './cache-manager.js';
 
 import { execFileSync } from 'child_process';
@@ -27,6 +27,7 @@ const version = packageInfo.version || '0.0.0';
 let warnedDevWebhookUrl = false;
 const inflight = new Map<string, Promise<CacheEntry>>();
 const ADMIN_TOKEN = process.env.ADMIN_TOKEN;
+const requireAdmin = createRequireAdmin(ADMIN_TOKEN);
 
 type ErrorLike = { message?: string };
 type WildcardParams = express.Request['params'] & { 0?: string };
@@ -103,11 +104,6 @@ function validationMessage(e: unknown): string {
 function markLegacyOwner(res: express.Response) {
   res.setHeader('Deprecation', 'true');
   res.setHeader('Warning', `299 - "owner-less repository API routes are deprecated; using ${DEFAULT_OWNER}"`);
-}
-
-function requireAdmin(req: express.Request, res: express.Response, next: express.NextFunction) {
-  if (isAdminAuthorized(req, ADMIN_TOKEN)) return next();
-  return res.status(401).json({ error: 'Unauthorized' });
 }
 
 function isInsideDir(absPath: string, dir: string): boolean {
