@@ -1,4 +1,5 @@
 import React, { useEffect, useState, useRef, forwardRef } from 'react';
+import { api } from './api';
 
 interface IframeWithRetryProps {
   port: number;
@@ -39,7 +40,7 @@ export const IframeWithRetry = forwardRef<HTMLIFrameElement, IframeWithRetryProp
             // Fetch server log every 3 attempts
             if (cacheId && (i + 1) % 3 === 0) {
               try {
-                const data = await fetch(`/api/cache/${cacheId}/log`).then(r => r.json());
+                const data = await api<{ log?: string }>(`/api/cache/${cacheId}/log`);
                 if (data.log) setServerLog(data.log);
               } catch {}
             }
@@ -51,7 +52,7 @@ export const IframeWithRetry = forwardRef<HTMLIFrameElement, IframeWithRetryProp
           // Fetch final log
           if (cacheId) {
             try {
-              const data = await fetch(`/api/cache/${cacheId}/log`).then(r => r.json());
+              const data = await api<{ log?: string }>(`/api/cache/${cacheId}/log`);
               if (data.log) setServerLog(data.log);
             } catch {}
           }
@@ -82,7 +83,7 @@ export const IframeWithRetry = forwardRef<HTMLIFrameElement, IframeWithRetryProp
               <div style={{ display: 'flex', gap: 8 }}>
                 <button onClick={() => { setCancelled(true); cancelledRef.current = true; }} style={{ padding: '4px 16px', background: 'transparent', border: '1px solid #555', borderRadius: 6, color: '#999', cursor: 'pointer', fontSize: 13 }}>Cancel</button>
                 {cacheId && (
-                  <button onClick={async () => { setShowLog(!showLog); if (!showLog && cacheId) { try { const d = await fetch(`/api/cache/${cacheId}/log`).then(r => r.json()); if (d.log) setServerLog(d.log); } catch {} } }} style={{ padding: '4px 16px', background: 'transparent', border: '1px solid #555', borderRadius: 6, color: '#999', cursor: 'pointer', fontSize: 13 }}>
+                  <button onClick={async () => { setShowLog(!showLog); if (!showLog && cacheId) { try { const d = await api<{ log?: string }>(`/api/cache/${cacheId}/log`); if (d.log) setServerLog(d.log); } catch {} } }} style={{ padding: '4px 16px', background: 'transparent', border: '1px solid #555', borderRadius: 6, color: '#999', cursor: 'pointer', fontSize: 13 }}>
                     {showLog ? 'Hide Log' : 'Show Log'}
                   </button>
                 )}

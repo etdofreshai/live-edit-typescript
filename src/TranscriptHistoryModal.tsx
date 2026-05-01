@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
+import { apiFetch } from './api';
 
 export interface TranscriptEntry {
   id: string;
@@ -36,7 +37,7 @@ export function TranscriptHistoryModal({ onClose }: TranscriptHistoryModalProps)
 
   const fetchHistory = async () => {
     try {
-      const res = await fetch(`${import.meta.env.BASE_URL}api/transcript-history`);
+      const res = await apiFetch(`${import.meta.env.BASE_URL}api/transcript-history`);
       if (res.ok) {
         const data: TranscriptEntry[] = await res.json();
         setEntries(data);
