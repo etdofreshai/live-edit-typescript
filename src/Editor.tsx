@@ -492,7 +492,7 @@ export default function Editor({ initialOwner, initialRepo, initialBranch, initi
     
     const setupConsoleInterception = () => {
       try {
-        const iframeWindow = iframe.contentWindow;
+        const iframeWindow = iframe.contentWindow as (Window & typeof globalThis) | null;
         if (!iframeWindow) return;
 
         const originalConsole = {

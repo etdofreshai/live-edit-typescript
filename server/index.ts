@@ -8,20 +8,37 @@ import multer from 'multer';
 // Using native FormData + Blob (Node 22)
 import { listRepos, listBranches, listCommits, getBranchHead, getCommit, createBranch, getDefaultBranch, compareBranches, createPullRequest, OWNER } from './github.js';
 import { getEntry, addEntry, evictIfNeeded, allocatePort, removeEntry, listEntries, makeId, getEntryByPort, getLatestEntries, updateEntry, getEntryById } from './cache-manager.js';
-import { cloneAndStart, getTargetDir, pullLatest, getServerLog } from './runner.js';
+import { cloneAndStart, pullLatest, getServerLog } from './runner.js';
 import { webhookRouter, registerWebhook, unregisterWebhook } from './webhook.js';
+import { assertInsideTargets } from './path-safety.js';
+import { validateBranch, validateRepo, validateSha } from './validators.js';
 
-import { execSync } from 'child_process';
+import { execFileSync } from 'child_process';
 
 const app = express();
 app.use(cors());
 
+function validationMessage(e: unknown): string {
+  const message = e instanceof Error ? e.message : '';
+  if (message.startsWith('invalid repo:')) return 'invalid repo';
+  if (message.startsWith('invalid sha:')) return 'invalid sha';
+  if (message.startsWith('invalid branch:')) return 'invalid branch';
+  if (message === 'path outside targets' || message === 'path outside entry') return 'invalid path';
+  return 'invalid input';
+}
+
+function isInsideDir(absPath: string, dir: string): boolean {
+  const resolved = pathModule.resolve(absPath);
+  const root = pathModule.resolve(dir);
+  return resolved === root || resolved.startsWith(root + pathModule.sep);
+}
+
 // Git info for footer
 const gitInfo = (() => {
   try {
-    const sha = execSync('git rev-parse HEAD', { encoding: 'utf8' }).trim();
-    const branch = execSync('git rev-parse --abbrev-ref HEAD', { encoding: 'utf8' }).trim();
-    const date = execSync('git log -1 --format=%aI', { encoding: 'utf8' }).trim();
+    const sha = execFileSync('git', ['rev-parse', 'HEAD'], { encoding: 'utf8' }).trim();
+    const branch = execFileSync('git', ['rev-parse', '--abbrev-ref', 'HEAD'], { encoding: 'utf8' }).trim();
+    const date = execFileSync('git', ['log', '-1', '--format=%aI'], { encoding: 'utf8' }).trim();
     return { owner: OWNER, repo: 'live-edit-typescript', branch, sha, date };
   } catch { return null; }
 })();
@@ -48,14 +65,17 @@ app.get('/api/repos', async (_req, res) => {
     const repos = await listRepos();
     res.json(repos);
   } catch (e: any) {
+    if (e.message?.startsWith('invalid ')) return res.status(400).json({ error: validationMessage(e) });
     res.status(500).json({ error: e.message });
   }
 });
 
 app.get('/api/repos/:repo/branches', async (req, res) => {
   try {
-    res.json(await listBranches(req.params.repo));
+    const repo = validateRepo(req.params.repo);
+    res.json(await listBranches(repo));
   } catch (e: any) {
+    if (e.message?.startsWith('invalid ')) return res.status(400).json({ error: validationMessage(e) });
     res.status(500).json({ error: e.message });
   }
 });
@@ -64,10 +84,14 @@ app.post('/api/repos/:repo/branches', async (req, res) => {
   const { name, from } = req.body;
   if (!name || !from) return res.status(400).json({ error: 'name and from required' });
   try {
-    const sha = await getBranchHead(req.params.repo, from);
-    const ref = await createBranch(req.params.repo, name, sha);
+    const repo = validateRepo(req.params.repo);
+    const branchName = validateBranch(name);
+    const fromBranch = validateBranch(from);
+    const sha = await getBranchHead(repo, fromBranch);
+    const ref = await createBranch(repo, branchName, sha);
     res.json({ name, sha, ref: ref.ref });
   } catch (e: any) {
+    if (e.message?.startsWith('invalid ')) return res.status(400).json({ error: validationMessage(e) });
     const status = e.message.includes('already exists') ? 409 : 500;
     res.status(status).json({ error: e.message });
   }
@@ -75,13 +99,16 @@ app.post('/api/repos/:repo/branches', async (req, res) => {
 
 app.get('/api/repos/:repo/branches/:branch/compare', async (req, res) => {
   try {
-    const defaultBranch = await getDefaultBranch(req.params.repo);
-    if (req.params.branch === defaultBranch) {
+    const repo = validateRepo(req.params.repo);
+    const branch = validateBranch(req.params.branch);
+    const defaultBranch = await getDefaultBranch(repo);
+    if (branch === defaultBranch) {
       return res.json({ ahead: 0, behind: 0, defaultBranch });
     }
-    const cmp = await compareBranches(req.params.repo, defaultBranch, req.params.branch);
+    const cmp = await compareBranches(repo, defaultBranch, branch);
     res.json({ ahead: cmp.ahead_by, behind: cmp.behind_by, defaultBranch });
   } catch (e: any) {
+    if (e.message?.startsWith('invalid ')) return res.status(400).json({ error: validationMessage(e) });
     res.status(500).json({ error: e.message });
   }
 });
@@ -90,17 +117,24 @@ app.post('/api/repos/:repo/pulls', async (req, res) => {
   const { head, base, title, body } = req.body;
   if (!head || !base || !title) return res.status(400).json({ error: 'head, base, and title required' });
   try {
-    const pr = await createPullRequest(req.params.repo, title, head, base, body);
+    const repo = validateRepo(req.params.repo);
+    const headBranch = validateBranch(head);
+    const baseBranch = validateBranch(base);
+    const pr = await createPullRequest(repo, title, headBranch, baseBranch, body);
     res.json({ url: pr.html_url, number: pr.number });
   } catch (e: any) {
+    if (e.message?.startsWith('invalid ')) return res.status(400).json({ error: validationMessage(e) });
     res.status(500).json({ error: e.message });
   }
 });
 
 app.get('/api/repos/:repo/branches/:branch/commits', async (req, res) => {
   try {
-    res.json(await listCommits(req.params.repo, req.params.branch));
+    const repo = validateRepo(req.params.repo);
+    const branch = validateBranch(req.params.branch);
+    res.json(await listCommits(repo, branch));
   } catch (e: any) {
+    if (e.message?.startsWith('invalid ')) return res.status(400).json({ error: validationMessage(e) });
     res.status(500).json({ error: e.message });
   }
 });
@@ -110,8 +144,16 @@ app.get('/api/cache', (_req, res) => {
 });
 
 app.post('/api/run', async (req, res) => {
-  const { repo, sha, envVars, startMode } = req.body;
-  if (!repo || !sha) return res.status(400).json({ error: 'repo and sha required' });
+  const { envVars, startMode } = req.body;
+  let repo: string;
+  let sha: string;
+  if (!req.body.repo || !req.body.sha) return res.status(400).json({ error: 'repo and sha required' });
+  try {
+    repo = validateRepo(req.body.repo);
+    sha = validateSha(req.body.sha);
+  } catch (e) {
+    return res.status(400).json({ error: validationMessage(e) });
+  }
 
   const existing = getEntry(repo, sha);
   if (existing) return res.json(existing);
@@ -141,13 +183,22 @@ app.post('/api/run', async (req, res) => {
     addEntry(entry);
     res.json(entry);
   } catch (e: any) {
+    if (e.message?.startsWith('invalid ')) return res.status(400).json({ error: validationMessage(e) });
     res.status(500).json({ error: e.message });
   }
 });
 
 app.post('/api/run-latest', async (req, res) => {
-  const { repo, branch, envVars, startMode } = req.body;
-  if (!repo || !branch) return res.status(400).json({ error: 'repo and branch required' });
+  const { envVars, startMode } = req.body;
+  let repo: string;
+  let branch: string;
+  if (!req.body.repo || !req.body.branch) return res.status(400).json({ error: 'repo and branch required' });
+  try {
+    repo = validateRepo(req.body.repo);
+    branch = validateBranch(req.body.branch);
+  } catch (e) {
+    return res.status(400).json({ error: validationMessage(e) });
+  }
 
   try {
     const sha = await getBranchHead(repo, branch);
@@ -184,6 +235,7 @@ app.post('/api/run-latest', async (req, res) => {
 
     res.json(entry);
   } catch (e: any) {
+    if (e.message?.startsWith('invalid ')) return res.status(400).json({ error: validationMessage(e) });
     res.status(500).json({ error: e.message });
   }
 });
@@ -209,6 +261,11 @@ app.delete('/api/cache/:id', async (req, res) => {
 app.get('/api/cache/:id/files', (req, res) => {
   const entry = getEntryById(req.params.id);
   if (!entry) return res.status(404).json({ error: 'Not found' });
+  try {
+    assertInsideTargets(entry.dir);
+  } catch (e) {
+    return res.status(400).json({ error: validationMessage(e) });
+  }
 
   const files: string[] = [];
   const walk = (dir: string, prefix: string) => {
@@ -237,12 +294,12 @@ app.get('/api/cache/:id/files/*', (req, res) => {
   if (!entry) return res.status(404).json({ error: 'Not found' });
 
   const filePath = (req.params as any)[0] as string;
-  const fullPath = pathModule.join(entry.dir, filePath);
-
-  // Prevent path traversal
-  if (!fullPath.startsWith(entry.dir)) return res.status(403).json({ error: 'Forbidden' });
+  if (pathModule.isAbsolute(filePath)) return res.status(403).json({ error: 'Forbidden' });
+  const fullPath = pathModule.resolve(entry.dir, filePath);
 
   try {
+    assertInsideTargets(fullPath);
+    if (!isInsideDir(fullPath, entry.dir)) throw new Error('path outside entry');
     const stat = fs.statSync(fullPath);
     if (stat.size > 500_000) return res.json({ binary: true, path: filePath });
 
@@ -253,6 +310,9 @@ app.get('/api/cache/:id/files/*', (req, res) => {
 
     res.json({ content: buf.toString('utf-8'), path: filePath });
   } catch (e: any) {
+    if (e.message === 'path outside targets' || e.message === 'path outside entry') {
+      return res.status(403).json({ error: 'Forbidden' });
+    }
     res.status(404).json({ error: 'File not found' });
   }
 });
@@ -320,8 +380,17 @@ app.post('/api/voice', upload.fields([{ name: 'audio', maxCount: 1 }, { name: 's
   const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
   if (!OPENAI_API_KEY) return res.status(500).json({ error: 'OPENAI_API_KEY not configured' });
 
-  const context = req.body.context ? JSON.parse(req.body.context) : undefined;
-  const consoleLogs = req.body.consoleLogs ? JSON.parse(req.body.consoleLogs) : undefined;
+  let context: any;
+  let consoleLogs: any;
+  try {
+    context = req.body.context ? JSON.parse(req.body.context) : undefined;
+    consoleLogs = req.body.consoleLogs ? JSON.parse(req.body.consoleLogs) : undefined;
+    if (context?.repo) validateRepo(context.repo);
+    if (context?.branch) validateBranch(context.branch);
+    if (context?.sha) validateSha(context.sha);
+  } catch (e) {
+    return res.status(400).json({ error: validationMessage(e) });
+  }
   const audioFile = files.audio[0];
   const screenshotFile = files.screenshot?.[0];
   console.log(`[voice] Received: audio=${audioFile.size}b, screenshot=${screenshotFile ? screenshotFile.size + 'b' : 'none'}, consoleLogs=${consoleLogs ? consoleLogs.length : 0}`);
