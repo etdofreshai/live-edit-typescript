@@ -4,13 +4,31 @@ import { getLatestEntries, updateEntry } from './cache-manager.js';
 import { pullLatest } from './runner.js';
 import { getBranchHead, OWNER } from './github.js';
 
-const WEBHOOK_SECRET = process.env.WEBHOOK_SECRET || 'live-edit-webhook-secret';
+const isProduction = process.env.NODE_ENV === 'production';
+const configuredWebhookSecret = process.env.WEBHOOK_SECRET;
+const WEBHOOK_SECRET = configuredWebhookSecret || (isProduction ? undefined : 'dev-only-insecure');
 const TOKEN = process.env.GITHUB_TOKEN;
 
+if (!configuredWebhookSecret) {
+  if (isProduction) {
+    console.warn('[webhook] WEBHOOK_SECRET is not configured; webhook requests will return 503');
+  } else {
+    console.warn('[webhook] WEBHOOK_SECRET is not configured; using dev-only-insecure placeholder for local development');
+  }
+}
+
 function verifySignature(payload: Buffer, signature: string | undefined): boolean {
-  if (!signature) return false;
-  const expected = 'sha256=' + crypto.createHmac('sha256', WEBHOOK_SECRET).update(payload).digest('hex');
-  return crypto.timingSafeEqual(Buffer.from(expected), Buffer.from(signature));
+  if (!WEBHOOK_SECRET || !signature?.startsWith('sha256=')) return false;
+
+  const actualSig = signature.slice('sha256='.length);
+  const expectedSig = crypto.createHmac('sha256', WEBHOOK_SECRET).update(payload).digest('hex');
+  if (actualSig.length !== expectedSig.length) return false;
+
+  const actual = Buffer.from(actualSig, 'hex');
+  const expected = Buffer.from(expectedSig, 'hex');
+  if (actual.length !== expected.length) return false;
+
+  return crypto.timingSafeEqual(actual, expected);
 }
 
 export const webhookRouter = Router();
@@ -20,12 +38,21 @@ webhookRouter.post('/api/webhook', raw({ type: 'application/json' }), async (req
   const sig = req.headers['x-hub-signature-256'] as string | undefined;
   const body = req.body as Buffer;
 
+  if (!WEBHOOK_SECRET) {
+    return res.status(503).json({ error: 'Webhook secret not configured' });
+  }
+
   if (!verifySignature(body, sig)) {
     console.warn('[webhook] Invalid signature');
     return res.status(401).json({ error: 'Invalid signature' });
   }
 
-  const payload = JSON.parse(body.toString());
+  let payload: any;
+  try {
+    payload = JSON.parse(body.toString());
+  } catch {
+    return res.status(400).json({ error: 'Invalid JSON' });
+  }
   const repoName = payload.repository?.name;
   const ref = payload.ref as string | undefined; // e.g. "refs/heads/main"
 
@@ -54,15 +81,18 @@ webhookRouter.post('/api/webhook', raw({ type: 'application/json' }), async (req
 });
 
 // Auto-register webhook on a GitHub repo
-export async function registerWebhook(repo: string, requestHost?: string): Promise<void> {
+export async function registerWebhook(repo: string, webhookUrl: string): Promise<void> {
   if (!TOKEN) {
     console.warn('[webhook] No GITHUB_TOKEN, skipping webhook registration');
     return;
   }
+  if (!WEBHOOK_SECRET) {
+    console.warn('[webhook] No WEBHOOK_SECRET, skipping webhook registration');
+    return;
+  }
 
-  const webhookUrl = process.env.WEBHOOK_URL || (requestHost ? `https://${requestHost}/api/webhook` : null);
   if (!webhookUrl) {
-    console.warn('[webhook] No WEBHOOK_URL and no host header, skipping registration');
+    console.warn('[webhook] No WEBHOOK_URL, skipping registration');
     return;
   }
 
