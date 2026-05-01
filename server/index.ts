@@ -13,6 +13,7 @@ import { webhookRouter, registerWebhook, unregisterWebhook } from './webhook.js'
 import { assertInsideTargets } from './path-safety.js';
 import { validateBranch, validateRepo, validateSha } from './validators.js';
 import { walkBounded } from './file-walk.js';
+import type { CacheEntry } from './cache-manager.js';
 
 import { execFileSync } from 'child_process';
 
@@ -22,6 +23,7 @@ app.use(cors());
 const packageInfo = JSON.parse(fs.readFileSync(pathModule.join(process.cwd(), 'package.json'), 'utf-8')) as { version?: string };
 const version = packageInfo.version || '0.0.0';
 let warnedDevWebhookUrl = false;
+const inflight = new Map<string, Promise<CacheEntry>>();
 
 function validationMessage(e: unknown): string {
   const message = e instanceof Error ? e.message : '';
@@ -180,20 +182,31 @@ app.post('/api/run', async (req, res) => {
     return res.status(400).json({ error: validationMessage(e) });
   }
 
-  const existing = getEntry(repo, sha);
-  if (existing) return res.json(existing);
+  const inflightKey = `${repo}:${sha}`;
+  const pending = inflight.get(inflightKey);
+  if (pending) {
+    try {
+      return res.json(await pending);
+    } catch (e: any) {
+      if (e.message?.startsWith('invalid ')) return res.status(400).json({ error: validationMessage(e) });
+      return res.status(500).json({ error: e.message });
+    }
+  }
 
-  await evictIfNeeded();
+  const promise = (async (): Promise<CacheEntry> => {
+    const existing = getEntry(repo, sha);
+    if (existing) return existing;
 
-  const port = allocatePort();
-  if (!port) return res.status(503).json({ error: 'No ports available' });
+    await evictIfNeeded();
 
-  try {
+    const port = allocatePort();
+    if (!port) throw new Error('No ports available');
+
     const [{ dir, pid, type }, commitInfo] = await Promise.all([
       cloneAndStart(repo, sha, port, { envVars, startMode }),
       getCommit(repo, sha).catch(() => ({ message: '', date: '' })),
     ]);
-    const entry = {
+    const entry: CacheEntry = {
       id: makeId(repo, sha),
       repo,
       sha,
@@ -206,10 +219,17 @@ app.post('/api/run', async (req, res) => {
       commitDate: commitInfo.date,
     };
     addEntry(entry);
-    res.json(entry);
+    return entry;
+  })();
+  inflight.set(inflightKey, promise);
+  try {
+    res.json(await promise);
   } catch (e: any) {
     if (e.message?.startsWith('invalid ')) return res.status(400).json({ error: validationMessage(e) });
-    res.status(500).json({ error: e.message });
+    const status = e.message === 'No ports available' ? 503 : 500;
+    res.status(status).json({ error: e.message });
+  } finally {
+    inflight.delete(inflightKey);
   }
 });
 
@@ -228,25 +248,36 @@ app.post('/api/run-latest', async (req, res) => {
   const webhookUrl = getWebhookCallbackUrl();
   if (!webhookUrl) return res.status(500).json({ error: 'webhook URL not configured' });
 
-  try {
+  const inflightKey = `${repo}:${branch}`;
+  const pending = inflight.get(inflightKey);
+  if (pending) {
+    try {
+      return res.json(await pending);
+    } catch (e: any) {
+      if (e.message?.startsWith('invalid ')) return res.status(400).json({ error: validationMessage(e) });
+      return res.status(500).json({ error: e.message });
+    }
+  }
+
+  const promise = (async (): Promise<CacheEntry> => {
     const sha = await getBranchHead(repo, branch);
 
     // Check if we already have a latest entry for this repo+branch
     const existing = getLatestEntries().find(e => e.repo === repo && e.branch === branch);
     if (existing) {
       existing.lastAccessed = Date.now();
-      return res.json(existing);
+      return existing;
     }
 
     await evictIfNeeded();
     const port = allocatePort();
-    if (!port) return res.status(503).json({ error: 'No ports available' });
+    if (!port) throw new Error('No ports available');
 
     const [{ dir, pid, type }, commitInfo] = await Promise.all([
       cloneAndStart(repo, sha, port, { branch, isLatest: true, envVars, startMode }),
       getCommit(repo, sha).catch(() => ({ message: '', date: '' })),
     ]);
-    const entry = {
+    const entry: CacheEntry = {
       id: makeId(repo, sha),
       repo, sha, port, dir, pid,
       lastAccessed: Date.now(),
@@ -261,10 +292,17 @@ app.post('/api/run-latest', async (req, res) => {
     // Auto-register webhook for this repo
     registerWebhook(repo, webhookUrl);
 
-    res.json(entry);
+    return entry;
+  })();
+  inflight.set(inflightKey, promise);
+  try {
+    res.json(await promise);
   } catch (e: any) {
     if (e.message?.startsWith('invalid ')) return res.status(400).json({ error: validationMessage(e) });
-    res.status(500).json({ error: e.message });
+    const status = e.message === 'No ports available' ? 503 : 500;
+    res.status(status).json({ error: e.message });
+  } finally {
+    inflight.delete(inflightKey);
   }
 });
 
