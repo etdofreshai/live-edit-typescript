@@ -196,6 +196,16 @@ body {
 .cache-repo { font-weight: 600; color: var(--text-primary); font-size: 13px; }
 .cache-sha { font-family: 'SF Mono', 'Cascadia Code', monospace; color: var(--text-muted); font-size: 12px; margin-left: 6px; }
 .cache-port { color: var(--accent-green); font-size: 12px; margin-left: 8px; }
+.cache-meta {
+  display: flex; align-items: center; gap: 6px; flex-wrap: wrap;
+}
+.cache-link {
+  color: var(--text-muted); font-size: 10px; text-decoration: none;
+}
+.cache-link:hover { color: var(--text-secondary); }
+.cache-type-label {
+  color: var(--text-muted); font-size: 11px;
+}
 .cache-badge {
   display: inline-block; margin-left: 8px;
   background: var(--accent-green-dim); color: #fff;
