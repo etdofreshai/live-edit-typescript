@@ -249,6 +249,38 @@ body {
   height: 100%; color: var(--text-muted); font-size: 14px;
 }
 
+/* === Standalone Preview Page === */
+.preview-page-shell {
+  width: 100vw;
+  height: 100vh;
+  overflow: hidden;
+}
+
+.preview-page-state {
+  width: 100vw;
+  height: 100vh;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  background: var(--bg-sidebar);
+  color: var(--text-muted);
+}
+
+.preview-page-state--embedded {
+  width: 100%;
+  height: 100%;
+}
+
+.preview-page-state--error {
+  color: var(--danger);
+}
+
+.preview-page-error-icon {
+  font-size: 24px;
+}
+
 /* Loading overlay */
 .loading-overlay {
   position: absolute; inset: 0; z-index: 10;

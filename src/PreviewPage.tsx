@@ -104,17 +104,7 @@ export default function PreviewPage() {
 
   if (loading) {
     return (
-      <div style={{
-        width: '100vw',
-        height: '100vh',
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'center',
-        background: '#1e1e2e',
-        color: '#6b7280',
-        flexDirection: 'column',
-        gap: 12,
-      }}>
+      <div className="preview-page-state" role="status" aria-live="polite">
         <div className="spinner spinner-large" />
         <div>Loading preview…</div>
       </div>
@@ -123,18 +113,8 @@ export default function PreviewPage() {
 
   if (error) {
     return (
-      <div style={{
-        width: '100vw',
-        height: '100vh',
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'center',
-        background: '#1e1e2e',
-        color: '#f38ba8',
-        flexDirection: 'column',
-        gap: 12,
-      }}>
-        <div style={{ fontSize: 24 }}>⚠</div>
+      <div className="preview-page-state preview-page-state--error" role="alert">
+        <div className="preview-page-error-icon" aria-hidden="true">⚠</div>
         <div>{error}</div>
       </div>
     );
@@ -142,37 +122,21 @@ export default function PreviewPage() {
 
   if (!entry) {
     return (
-      <div style={{
-        width: '100vw',
-        height: '100vh',
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'center',
-        background: '#1e1e2e',
-        color: '#6b7280',
-      }}>
+      <div className="preview-page-state" role="status">
         No preview available
       </div>
     );
   }
 
   return (
-    <div style={{ width: '100vw', height: '100vh', overflow: 'hidden' }}>
+    <main className="preview-page-shell" aria-label="Preview">
       {entry.type === 'static' ? (
-        <div style={{
-          width: '100%',
-          height: '100%',
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'center',
-          background: '#1e1e2e',
-          color: '#6b7280',
-        }}>
+        <div className="preview-page-state preview-page-state--embedded" role="status">
           This is a static repository (no Vite dev server)
         </div>
       ) : (
         <IframeWithRetry port={entry.port} cacheId={entry.id} />
       )}
-    </div>
+    </main>
   );
 }
