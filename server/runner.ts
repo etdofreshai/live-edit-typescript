@@ -5,6 +5,7 @@ import type { WriteStream } from 'fs';
 import os from 'os';
 import path from 'path';
 import type { CacheEntry } from './cache-manager.js';
+import { log } from './logging.js';
 import { assertInsideTargets, safeTargetSubdir } from './path-safety.js';
 import { validateBranch, validateOwner, validateRepo, validateSha } from './validators.js';
 import { waitForPort } from './wait-for-port.js';
@@ -226,7 +227,7 @@ export async function cloneAndStart(
     const viteCli = path.join(dir, 'node_modules', 'vite', 'dist', 'node', 'cli.js');
     if (!existsSync(viteCli)) {
       // Nuke node_modules and retry once
-      console.warn(`[runner] Vite dist missing in ${dir}, retrying install...`);
+      log.warn(`[runner] Vite dist missing in ${dir}, retrying install...`);
       rmSync(path.join(dir, 'node_modules'), { recursive: true, force: true });
       installDependencies(dir, processEnv);
       if (!existsSync(viteCli)) {

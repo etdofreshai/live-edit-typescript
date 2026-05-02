@@ -16,6 +16,7 @@ import { assertInsideTargets } from './path-safety.js';
 import { validateBranch, validateOwner, validateRepo, validateSha } from './validators.js';
 import { walkBounded } from './file-walk.js';
 import { createRequireAdmin } from './admin-middleware.js';
+import { log } from './logging.js';
 import type { CacheEntry } from './cache-manager.js';
 
 import { execFileSync } from 'child_process';
@@ -30,11 +31,6 @@ const inflight = new Map<string, Promise<CacheEntry>>();
 const ADMIN_TOKEN = process.env.ADMIN_TOKEN;
 const requireAdmin = createRequireAdmin(ADMIN_TOKEN);
 const DEFAULT_SERVER_PORT = 3000;
-const log = {
-  info: (...args: Parameters<typeof console.log>) => console.log(...args),
-  warn: (...args: Parameters<typeof console.warn>) => console.warn(...args),
-  error: (...args: Parameters<typeof console.error>) => console.error(...args),
-};
 
 type ErrorLike = { message?: string };
 type WildcardParams = express.Request['params'] & { 0?: string };
