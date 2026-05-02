@@ -78,12 +78,11 @@ export function VoiceButton({ context, iframeRef, consoleLogs }: VoiceButtonProp
   const screenshotUrls = useRef<Map<string, string>>(new Map());
   const fadeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const touchStartXRef = useRef<number>(0);
-  const hoveringRef = useRef(false);
 
   const scheduleFade = useCallback(() => {
     if (fadeTimerRef.current) clearTimeout(fadeTimerRef.current);
     fadeTimerRef.current = setTimeout(() => {
-      if (!hoveringRef.current) setFaded(true);
+      setFaded(true);
     }, 5000);
   }, []);
 
@@ -235,23 +234,12 @@ export function VoiceButton({ context, iframeRef, consoleLogs }: VoiceButtonProp
     else if (dx < -50) setMinimized(false); // swipe left → expand
   };
 
-  // Hover handlers for fade
-  const handleMouseEnter = () => {
-    hoveringRef.current = true;
-    setFaded(false);
-    if (fadeTimerRef.current) clearTimeout(fadeTimerRef.current);
-  };
-
-  const handleMouseLeave = () => {
-    hoveringRef.current = false;
-    if (jobs.length > 0) scheduleFade();
-  };
-
   return (
     <>
       <button
         className={`voice-btn ${recording ? 'recording' : ''}`}
         onClick={handleClick}
+        aria-label={recording ? 'Stop voice recording' : 'Start voice recording'}
         title={recording ? 'Click to stop' : 'Click to record'}
       >
         <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -265,8 +253,6 @@ export function VoiceButton({ context, iframeRef, consoleLogs }: VoiceButtonProp
       {jobs.length > 0 && (
         <div
           className={`voice-queue${minimized ? ' minimized' : ''}${faded ? ' faded' : ''}`}
-          onMouseEnter={handleMouseEnter}
-          onMouseLeave={handleMouseLeave}
           onTouchStart={handleTouchStart}
           onTouchEnd={handleTouchEnd}
         >
@@ -278,6 +264,7 @@ export function VoiceButton({ context, iframeRef, consoleLogs }: VoiceButtonProp
             <button
               className="voice-minimize-btn"
               onClick={() => setMinimized(m => !m)}
+              aria-label={minimized ? 'Expand voice queue' : 'Minimize voice queue'}
               title={minimized ? 'Expand (swipe left)' : 'Minimize (swipe right)'}
             >
               {minimized ? '▸' : '▾'}
@@ -311,8 +298,8 @@ export function VoiceButton({ context, iframeRef, consoleLogs }: VoiceButtonProp
                 {screenshotUrls.current.has(j.id) && (
                   <img
                     src={screenshotUrls.current.get(j.id)}
-                    alt="screenshot"
-                    style={{ width: 48, height: 36, objectFit: 'cover', borderRadius: 4, flexShrink: 0, border: '1px solid #3a3a5e' }}
+                    alt="Voice job screenshot"
+                    className="voice-msg-screenshot"
                   />
                 )}
                 <span className="voice-msg-icon">
@@ -327,7 +314,14 @@ export function VoiceButton({ context, iframeRef, consoleLogs }: VoiceButtonProp
                   <ElapsedTimer startedAt={j.startedAt} />
                 )}
                 {(j.status === 'sent' || j.status === 'error') && (
-                  <button className="voice-msg-dismiss" onClick={() => dismissJob(j.id)} title="Dismiss">✕</button>
+                  <button
+                    className="voice-msg-dismiss"
+                    onClick={() => dismissJob(j.id)}
+                    aria-label="Dismiss voice job"
+                    title="Dismiss"
+                  >
+                    ✕
+                  </button>
                 )}
               </div>
             ))
