@@ -649,15 +649,15 @@ export default function Editor({ initialOwner, initialRepo, initialBranch, initi
       )}
       {!showHeader && (
         <button
+          className="show-top-bar-btn"
           onClick={() => setShowHeader(true)}
-          style={{ position: 'fixed', top: 6, right: 6, zIndex: 200, background: 'rgba(26,26,46,0.85)', color: '#6b7280', border: '1px solid #3a3a5e', borderRadius: 6, padding: '2px 8px', cursor: 'pointer', fontSize: 12 }}
           title="Show top bar"
         >▼</button>
       )}
 
       <div className="main-content">
       <div className={`sidebar ${sidebarOpen ? '' : 'collapsed'}`}>
-        <h2><a href="/" style={{ color: 'inherit', textDecoration: 'none' }}>Live Edit TypeScript</a></h2>
+        <h2><a className="sidebar-home-link" href="/">Live Edit TypeScript</a></h2>
         {error && <div className="error-banner">{error}</div>}
 
         <RepoSelector owner={selectedOwner} repos={repos} selectedRepo={selectedRepo} onOwnerChange={changeOwner} onSelectRepo={selectRepo} />
@@ -710,7 +710,7 @@ export default function Editor({ initialOwner, initialRepo, initialBranch, initi
       </div>
 
       <div className="preview-area">
-        <div className="preview-body" style={{ position: 'relative' }}>
+        <div className="preview-body">
           {loading && (
             <div className="loading-overlay">
               <span className="spinner spinner-large" />
@@ -723,8 +723,8 @@ export default function Editor({ initialOwner, initialRepo, initialBranch, initi
             <IframeWithRetry ref={iframeRef} key={`${activeEntryId}-${previewPort}`} port={previewPort} cacheId={activeEntryId || undefined} />
           ) : null}
           {previewPort && (
-            <div className="preview-fallback" style={{ display: 'none', alignItems: 'center', justifyContent: 'center', height: '100%', color: '#6c7086', fontSize: 14, flexDirection: 'column', gap: 8, position: 'absolute', inset: 0 }}>
-              <span style={{ fontSize: 28 }}>⚠️</span>
+            <div className="preview-fallback">
+              <span className="preview-fallback-icon">⚠️</span>
               <span>Server not available — try running the entry again</span>
             </div>
           )}
