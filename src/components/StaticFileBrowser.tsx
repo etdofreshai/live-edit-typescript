@@ -69,7 +69,7 @@ export function StaticFileBrowser({
             role="button"
             tabIndex={0}
             className={`sfb-item${isSelected ? ' selected' : ''}`}
-            style={{ paddingLeft: 8 + depth * 16 }}
+            style={{ '--sfb-depth': depth } as React.CSSProperties}
             onClick={() => handleClick(item, isDir)}
             onKeyDown={e => handleKeyDown(e, item, isDir)}
             aria-expanded={isDir ? expanded : undefined}
