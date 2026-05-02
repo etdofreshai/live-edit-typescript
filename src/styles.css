@@ -820,3 +820,188 @@ body {
   cursor: pointer;
   font-size: 12px;
 }
+
+/* === Landing Page === */
+.lp-container {
+  min-height: 100vh;
+  background: var(--bg-sidebar);
+  color: var(--text-primary);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 40px 20px;
+}
+
+.lp-inner {
+  max-width: 800px;
+  width: 100%;
+}
+
+.lp-title {
+  font-size: 42px;
+  font-weight: 700;
+  margin-bottom: 12px;
+  color: var(--accent);
+  text-align: center;
+}
+
+.lp-subtitle {
+  font-size: 16px;
+  color: #6b7280;
+  text-align: center;
+  margin-bottom: 40px;
+}
+
+.lp-link {
+  color: var(--accent);
+  text-decoration: none;
+}
+
+.lp-error {
+  background: rgba(243, 139, 168, 0.27);
+  color: var(--danger);
+  padding: 12px 16px;
+  border-radius: 8px;
+  margin-bottom: 20px;
+}
+
+.lp-loading {
+  text-align: center;
+  padding: 40px;
+}
+
+.lp-loading-text {
+  color: #6b7280;
+  margin-top: 12px;
+}
+
+.lp-repo-list {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.lp-repo-card {
+  display: block;
+  background: #1a1a2e;
+  border: 1px solid #3a3a5e;
+  border-radius: 12px;
+  padding: 20px 24px;
+  text-decoration: none;
+  color: inherit;
+  transition: all 0.2s ease;
+}
+
+.lp-repo-card:hover {
+  border-color: var(--accent);
+  transform: translateY(-2px);
+}
+
+.lp-repo-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  margin-bottom: 8px;
+}
+
+.lp-repo-name-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.lp-repo-avatar {
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  border: 1px solid #3a3a5e;
+}
+
+.lp-repo-name {
+  font-size: 20px;
+  font-weight: 600;
+  margin: 0;
+  color: var(--text-primary);
+}
+
+.lp-repo-time {
+  font-size: 13px;
+  color: #6b7280;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.lp-repo-desc {
+  margin: 0;
+  font-size: 14px;
+  color: #9399b2;
+  line-height: 1.5;
+}
+
+.lp-repo-actions {
+  margin-top: 12px;
+  display: flex;
+  gap: 10px;
+  align-items: center;
+}
+
+.lp-btn-action {
+  font-size: 13px;
+  font-weight: 500;
+  text-decoration: none;
+  padding: 4px 12px;
+  border-radius: 6px;
+  transition: all 0.15s ease;
+}
+
+.lp-btn-action:hover {
+  text-decoration: none;
+}
+
+.lp-btn-run {
+  color: var(--accent-green);
+  border: 1px solid rgba(166, 227, 161, 0.27);
+}
+
+.lp-btn-run:hover {
+  background: rgba(166, 227, 161, 0.13);
+}
+
+.lp-btn-edit {
+  color: var(--accent);
+  border: 1px solid rgba(137, 180, 250, 0.27);
+}
+
+.lp-btn-edit:hover {
+  background: rgba(137, 180, 250, 0.13);
+}
+
+.lp-btn-github {
+  color: #6b7280;
+  border: 1px solid #3a3a5e;
+}
+
+.lp-btn-github:hover {
+  background: rgba(58, 58, 94, 0.27);
+  color: var(--text-primary);
+}
+
+.lp-git-info {
+  margin-top: 60px;
+  padding: 16px 20px;
+  font-size: 12px;
+  color: #4a4a6a;
+  text-align: center;
+  font-family: monospace;
+  line-height: 1.8;
+}
+
+.lp-git-info a {
+  color: #4a4a6a;
+  text-decoration: none;
+}
+
+.lp-git-info a:hover {
+  color: var(--accent);
+}
