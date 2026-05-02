@@ -4,6 +4,7 @@ import { addEntry, allocatePort, getLatestEntries, makeId, releasePort, removeEn
 import { pullLatest } from './runner.js';
 import { cloneAndStart, stopServer } from './runner.js';
 import { getBranchHead, DEFAULT_OWNER } from './github.js';
+import { log } from './logging.js';
 import { validateOwner, validateRepo } from './validators.js';
 
 const isProduction = process.env.NODE_ENV === 'production';
@@ -11,11 +12,6 @@ const configuredWebhookSecret = process.env.WEBHOOK_SECRET;
 const WEBHOOK_SECRET = configuredWebhookSecret || (isProduction ? undefined : 'dev-only-insecure');
 const TOKEN = process.env.GITHUB_TOKEN;
 const registeredWebhookRepos = new Set<string>();
-const log = {
-  info: (...args: Parameters<typeof console.log>) => console.log(...args),
-  warn: (...args: Parameters<typeof console.warn>) => console.warn(...args),
-  error: (...args: Parameters<typeof console.error>) => console.error(...args),
-};
 
 type GitHubPushPayload = {
   ref?: string;
