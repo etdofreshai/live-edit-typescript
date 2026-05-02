@@ -137,6 +137,10 @@ body {
   font-size: 16px; font-weight: 600; color: var(--text-primary);
   margin-bottom: 16px; letter-spacing: -0.01em;
 }
+.sidebar-home-link {
+  color: inherit;
+  text-decoration: none;
+}
 .sidebar h3 {
   font-size: 12px; font-weight: 600; text-transform: uppercase;
   letter-spacing: 0.05em; color: var(--text-muted);
@@ -311,6 +315,33 @@ body {
 .preview-placeholder {
   display: flex; align-items: center; justify-content: center;
   height: 100%; color: var(--text-muted); font-size: 14px;
+}
+.preview-fallback {
+  display: none;
+  align-items: center;
+  justify-content: center;
+  flex-direction: column;
+  gap: 8px;
+  position: absolute;
+  inset: 0;
+  height: 100%;
+  color: var(--text-muted);
+  font-size: 14px;
+}
+.preview-fallback-icon { font-size: 28px; }
+
+.show-top-bar-btn {
+  position: fixed;
+  top: 6px;
+  right: 6px;
+  z-index: 200;
+  background: rgba(26, 26, 46, 0.85);
+  color: var(--text-muted);
+  border: 1px solid #3a3a5e;
+  border-radius: var(--radius);
+  padding: 2px 8px;
+  cursor: pointer;
+  font-size: 12px;
 }
 
 /* === Iframe Retry States === */
