@@ -537,6 +537,15 @@ body {
 
 .voice-msg.error { background: rgba(243, 139, 168, 0.05); }
 
+.voice-msg-screenshot {
+  width: 48px;
+  height: 36px;
+  object-fit: cover;
+  border-radius: 4px;
+  border: 1px solid #3a3a5e;
+  flex-shrink: 0;
+}
+
 .voice-msg-icon { flex-shrink: 0; width: 18px; height: 18px; display: flex; align-items: center; justify-content: center; }
 .voice-msg-text { min-width: 0; overflow: hidden; text-overflow: ellipsis; flex: 1; }
 
