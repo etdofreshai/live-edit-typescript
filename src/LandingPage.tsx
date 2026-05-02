@@ -12,23 +12,8 @@ interface Repo {
   };
 }
 
-const api = (path: string) => fetch(path).then(r => r.json());
-
-function timeAgo(dateStr: string): string {
-  const now = Date.now();
-  const then = new Date(dateStr).getTime();
-  const sec = Math.floor((now - then) / 1000);
-  if (sec < 60) return 'just now';
-  const min = Math.floor(sec / 60);
-  if (min < 60) return `${min}m ago`;
-  const hr = Math.floor(min / 60);
-  if (hr < 24) return `${hr}h ago`;
-  const days = Math.floor(hr / 24);
-  if (days < 30) return `${days}d ago`;
-  const months = Math.floor(days / 30);
-  if (months < 12) return `${months}mo ago`;
-  return `${Math.floor(months / 12)}y ago`;
-}
+import { api } from './api';
+import { timeAgo } from './utils';
 
 interface GitInfo {
   owner: string;
@@ -45,10 +30,9 @@ export default function LandingPage() {
   const [gitInfo, setGitInfo] = useState<GitInfo | null>(null);
 
   useEffect(() => {
-    api('/api/info').then(setGitInfo).catch(() => {});
-    api('/api/repos')
+    api<GitInfo>('/api/info').then(setGitInfo).catch(() => {});
+    api<Repo[]>('/api/repos')
       .then(repoList => {
-        // Sort by updated_at descending
         const sorted = [...repoList].sort((a, b) =>
           new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime()
         );
@@ -62,112 +46,54 @@ export default function LandingPage() {
   }, []);
 
   return (
-    <div style={{
-      minHeight: '100vh',
-      background: '#1e1e2e',
-      color: '#cdd6f4',
-      display: 'flex',
-      flexDirection: 'column',
-      alignItems: 'center',
-      padding: '40px 20px',
-    }}>
-      <div style={{ maxWidth: 800, width: '100%' }}>
-        <h1 style={{
-          fontSize: 42,
-          fontWeight: 700,
-          marginBottom: 12,
-          color: '#89b4fa',
-          textAlign: 'center',
-        }}>
+    <div className="lp-container">
+      <div className="lp-inner">
+        <h1 className="lp-title">
           Live Edit TypeScript
         </h1>
-        <p style={{
-          fontSize: 16,
-          color: '#6b7280',
-          textAlign: 'center',
-          marginBottom: 40,
-        }}>
+        <p className="lp-subtitle">
           Browse and edit Vite + TypeScript repos from{' '}
           <a
             href="https://github.com/etdofreshai"
             target="_blank"
             rel="noopener noreferrer"
-            style={{ color: '#89b4fa', textDecoration: 'none' }}
+            className="lp-link"
           >
             etdofreshai
           </a>
         </p>
 
         {error && (
-          <div style={{
-            background: '#f38ba844',
-            color: '#f38ba8',
-            padding: '12px 16px',
-            borderRadius: 8,
-            marginBottom: 20,
-          }}>
+          <div className="lp-error">
             {error}
           </div>
         )}
 
         {loading ? (
-          <div style={{ textAlign: 'center', padding: 40 }}>
+          <div className="lp-loading">
             <div className="spinner spinner-large" />
-            <div style={{ color: '#6b7280', marginTop: 12 }}>Loading repositories…</div>
+            <div className="lp-loading-text">Loading repositories…</div>
           </div>
         ) : (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+          <div className="lp-repo-list">
             {repos.map(repo => (
               <Link
                 key={repo.name}
                 to={`/edit/etdofreshai/${repo.name}`}
-                style={{
-                  display: 'block',
-                  background: '#1a1a2e',
-                  border: '1px solid #3a3a5e',
-                  borderRadius: 12,
-                  padding: '20px 24px',
-                  textDecoration: 'none',
-                  color: 'inherit',
-                  transition: 'all 0.2s ease',
-                }}
-                onMouseEnter={e => {
-                  e.currentTarget.style.borderColor = '#89b4fa';
-                  e.currentTarget.style.transform = 'translateY(-2px)';
-                }}
-                onMouseLeave={e => {
-                  e.currentTarget.style.borderColor = '#3a3a5e';
-                  e.currentTarget.style.transform = 'translateY(0)';
-                }}
+                className="lp-repo-card"
               >
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 8 }}>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                <div className="lp-repo-header">
+                  <div className="lp-repo-name-row">
                     <img
                       src={repo.owner.avatar_url}
                       alt={`${repo.name} owner`}
-                      style={{
-                        width: 32,
-                        height: 32,
-                        borderRadius: '50%',
-                        border: '1px solid #3a3a5e',
-                      }}
+                      className="lp-repo-avatar"
                     />
-                    <h3 style={{
-                      fontSize: 20,
-                      fontWeight: 600,
-                      margin: 0,
-                      color: '#cdd6f4',
-                    }}>
+                    <h3 className="lp-repo-name">
                       {repo.name}
                     </h3>
                   </div>
-                  <div style={{
-                    fontSize: 13,
-                    color: '#6b7280',
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: 6,
-                  }}>
+                  <div className="lp-repo-time">
                     <span>⏱</span>
                     <span title={new Date(repo.updated_at).toLocaleString()}>
                       {timeAgo(repo.updated_at)}
@@ -175,54 +101,22 @@ export default function LandingPage() {
                   </div>
                 </div>
                 {repo.description && (
-                  <p style={{
-                    margin: 0,
-                    fontSize: 14,
-                    color: '#9399b2',
-                    lineHeight: 1.5,
-                  }}>
+                  <p className="lp-repo-desc">
                     {repo.description}
                   </p>
                 )}
-                <div style={{
-                  marginTop: 12,
-                  display: 'flex',
-                  gap: 10,
-                  alignItems: 'center',
-                }}>
+                <div className="lp-repo-actions">
                   <Link
                     to={`/etdofreshai/${repo.name}/`}
                     onClick={e => e.stopPropagation()}
-                    style={{
-                      fontSize: 13,
-                      color: '#a6e3a1',
-                      fontWeight: 500,
-                      textDecoration: 'none',
-                      padding: '4px 12px',
-                      border: '1px solid #a6e3a144',
-                      borderRadius: 6,
-                      transition: 'all 0.15s ease',
-                    }}
-                    onMouseEnter={e => { e.currentTarget.style.background = '#a6e3a122'; }}
-                    onMouseLeave={e => { e.currentTarget.style.background = 'transparent'; }}
+                    className="lp-btn-action lp-btn-run"
                   >
                     ▶ Run
                   </Link>
                   <Link
                     to={`/edit/etdofreshai/${repo.name}/main/latest`}
                     onClick={e => e.stopPropagation()}
-                    style={{
-                      fontSize: 13,
-                      color: '#89b4fa',
-                      fontWeight: 500,
-                      textDecoration: 'none',
-                      padding: '4px 12px',
-                      border: '1px solid #89b4fa44',
-                      borderRadius: 6,
-                      transition: 'all 0.15s ease',
-                    }}
-                    onMouseEnter={e => { e.currentTarget.style.background = '#89b4fa22'; }}
-                    onMouseLeave={e => { e.currentTarget.style.background = 'transparent'; }}
+                    className="lp-btn-action lp-btn-edit"
                   >
                     ✏️ Edit
                   </Link>
@@ -231,17 +125,8 @@ export default function LandingPage() {
                     target="_blank"
                     rel="noopener noreferrer"
                     onClick={e => e.stopPropagation()}
-                    style={{
-                      fontSize: 13,
-                      color: '#6b7280',
-                      textDecoration: 'none',
-                      padding: '4px 12px',
-                      border: '1px solid #3a3a5e',
-                      borderRadius: 6,
-                      transition: 'all 0.15s ease',
-                    }}
-                    onMouseEnter={e => { e.currentTarget.style.background = '#3a3a5e44'; e.currentTarget.style.color = '#cdd6f4'; }}
-                    onMouseLeave={e => { e.currentTarget.style.background = 'transparent'; e.currentTarget.style.color = '#6b7280'; }}
+                    className="lp-btn-action lp-btn-github"
+                    aria-label="View repository on GitHub"
                   >
                     GitHub ↗
                   </a>
@@ -253,40 +138,26 @@ export default function LandingPage() {
       </div>
 
       {gitInfo && (
-        <div style={{
-          marginTop: 60,
-          padding: '16px 20px',
-          fontSize: 12,
-          color: '#4a4a6a',
-          textAlign: 'center',
-          fontFamily: 'monospace',
-          lineHeight: 1.8,
-        }}>
+        <div className="lp-git-info">
           <a
             href={`https://github.com/${gitInfo.owner}/${gitInfo.repo}`}
             target="_blank"
             rel="noopener noreferrer"
-            style={{ color: '#4a4a6a', textDecoration: 'none' }}
-            onMouseEnter={e => e.currentTarget.style.color = '#89b4fa'}
-            onMouseLeave={e => e.currentTarget.style.color = '#4a4a6a'}
+            aria-label={`${gitInfo.owner}/${gitInfo.repo} repository`}
           >{gitInfo.owner}/{gitInfo.repo}</a>
           {' · '}
           <a
             href={`https://github.com/${gitInfo.owner}/${gitInfo.repo}/tree/${gitInfo.branch}`}
             target="_blank"
             rel="noopener noreferrer"
-            style={{ color: '#4a4a6a', textDecoration: 'none' }}
-            onMouseEnter={e => e.currentTarget.style.color = '#89b4fa'}
-            onMouseLeave={e => e.currentTarget.style.color = '#4a4a6a'}
+            aria-label={`${gitInfo.branch} branch`}
           >{gitInfo.branch}</a>
           {' · '}
           <a
             href={`https://github.com/${gitInfo.owner}/${gitInfo.repo}/commit/${gitInfo.sha}`}
             target="_blank"
             rel="noopener noreferrer"
-            style={{ color: '#4a4a6a', textDecoration: 'none' }}
-            onMouseEnter={e => e.currentTarget.style.color = '#89b4fa'}
-            onMouseLeave={e => e.currentTarget.style.color = '#4a4a6a'}
+            aria-label={`Commit ${gitInfo.sha.slice(0, 7)}`}
           >
             {gitInfo.sha.slice(0, 7)}
           </a>

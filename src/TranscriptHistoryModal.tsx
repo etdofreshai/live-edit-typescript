@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
+import { apiFetch } from './api';
 
 export interface TranscriptEntry {
   id: string;
@@ -36,7 +37,7 @@ export function TranscriptHistoryModal({ onClose }: TranscriptHistoryModalProps)
 
   const fetchHistory = async () => {
     try {
-      const res = await fetch(`${import.meta.env.BASE_URL}api/transcript-history`);
+      const res = await apiFetch(`${import.meta.env.BASE_URL}api/transcript-history`);
       if (res.ok) {
         const data: TranscriptEntry[] = await res.json();
         setEntries(data);
@@ -57,7 +58,7 @@ export function TranscriptHistoryModal({ onClose }: TranscriptHistoryModalProps)
       bottomRef.current.scrollIntoView({ behavior: firstLoadRef.current ? 'auto' : 'smooth' });
       firstLoadRef.current = false;
     }
-  }, [entries]); // eslint-disable-line
+  }, [entries]);
 
   const handleScroll = (e: React.UIEvent<HTMLDivElement>) => {
     const el = e.currentTarget;
@@ -74,43 +75,23 @@ export function TranscriptHistoryModal({ onClose }: TranscriptHistoryModalProps)
 
   return (
     <div
-      style={{
-        position: 'fixed', inset: 0,
-        background: 'rgba(0,0,0,0.75)',
-        zIndex: 2000,
-        display: 'flex',
-        flexDirection: 'column',
-      }}
+      className="transcript-history-modal-backdrop"
       onClick={onClose}
+      role="presentation"
     >
       <div
-        style={{
-          background: '#1e1e2e',
-          flex: 1,
-          display: 'flex',
-          flexDirection: 'column',
-          maxHeight: '100vh',
-          overflow: 'hidden',
-        }}
+        className="transcript-history-modal"
         onClick={e => e.stopPropagation()}
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="transcript-history-title"
       >
         {/* Header */}
-        <div style={{
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'space-between',
-          padding: '12px 20px',
-          borderBottom: '1px solid #313244',
-          background: '#181825',
-          flexShrink: 0,
-        }}>
-          <h2 style={{ margin: 0, color: '#cdd6f4', fontSize: 16, fontWeight: 600 }}>
+        <div className="transcript-history-modal-header">
+          <h2 id="transcript-history-title" className="transcript-history-modal-title">
             📜 Transcript History
             {entries.length > 0 && (
-              <span style={{
-                marginLeft: 8, fontSize: 11, background: '#313244',
-                color: '#a6adc8', borderRadius: 10, padding: '1px 8px', fontWeight: 500,
-              }}>
+              <span className="transcript-history-count">
                 {entries.length}
               </span>
             )}
@@ -118,35 +99,23 @@ export function TranscriptHistoryModal({ onClose }: TranscriptHistoryModalProps)
           <button
             onClick={onClose}
             title="Close (Esc)"
-            style={{
-              background: 'none', border: 'none', color: '#6c7086',
-              cursor: 'pointer', fontSize: 20, padding: '0 4px',
-              lineHeight: 1, display: 'flex', alignItems: 'center', justifyContent: 'center',
-              borderRadius: 4, transition: 'color 0.15s',
-            }}
-            onMouseEnter={e => (e.currentTarget.style.color = '#cdd6f4')}
-            onMouseLeave={e => (e.currentTarget.style.color = '#6c7086')}
+            aria-label="Close transcript history"
+            className="transcript-history-close-btn"
           >✕</button>
         </div>
 
         {/* Chat area */}
         <div
           ref={scrollRef}
-          style={{
-            flex: 1, overflowY: 'auto', padding: '16px 20px',
-            display: 'flex', flexDirection: 'column', gap: 0,
-          }}
+          className="transcript-history-chat"
           onScroll={handleScroll}
         >
           {entries.length === 0 ? (
-            <div style={{
-              flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center',
-              color: '#6c7086', fontSize: 14, textAlign: 'center', marginTop: '20vh',
-            }}>
+            <div className="transcript-history-empty">
               <div>
-                <div style={{ fontSize: 32, marginBottom: 12 }}>🎙️</div>
+                <div className="transcript-history-empty-icon" aria-hidden="true">🎙️</div>
                 <div>No transcripts yet.</div>
-                <div style={{ fontSize: 12, marginTop: 4, color: '#45475a' }}>Record something with the voice button!</div>
+                <div className="transcript-history-empty-hint">Record something with the voice button!</div>
               </div>
             </div>
           ) : (
@@ -157,121 +126,70 @@ export function TranscriptHistoryModal({ onClose }: TranscriptHistoryModalProps)
                 <div key={entry.id}>
                   {/* Date separator */}
                   {showDateSep && (
-                    <div style={{
-                      textAlign: 'center', margin: '16px 0 12px',
-                      fontSize: 11, color: '#45475a',
-                      display: 'flex', alignItems: 'center', gap: 8,
-                    }}>
-                      <div style={{ flex: 1, height: 1, background: '#2a2a3d' }} />
+                    <div className="transcript-history-date-separator">
+                      <div className="transcript-history-date-line" />
                       {formatDate(entry.timestamp)}
-                      <div style={{ flex: 1, height: 1, background: '#2a2a3d' }} />
+                      <div className="transcript-history-date-line" />
                     </div>
                   )}
 
                   {/* Conversation bubble group */}
-                  <div style={{ marginBottom: 16, display: 'flex', flexDirection: 'column', gap: 6 }}>
+                  <div className="transcript-history-entry">
                     {/* User message — right side */}
-                    <div style={{ display: 'flex', justifyContent: 'flex-end', alignItems: 'flex-end', gap: 8 }}>
-                      <div style={{ maxWidth: '68%', display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 3 }}>
-                        <div style={{ fontSize: 10, color: '#45475a' }}>
+                    <div className="transcript-history-row transcript-history-row-user">
+                      <div className="transcript-history-user-content">
+                        <div className="transcript-history-meta">
                           {formatTime(entry.timestamp)}
                           {entry.consoleLogs ? ` · ${entry.consoleLogs} log${entry.consoleLogs !== 1 ? 's' : ''}` : ''}
                         </div>
-                        <div style={{
-                          background: '#313244', color: '#cdd6f4',
-                          borderRadius: '12px 12px 2px 12px',
-                          padding: '8px 12px', fontSize: 13, lineHeight: 1.5,
-                          wordBreak: 'break-word',
-                        }}>
+                        <div className="transcript-history-bubble transcript-history-bubble-user">
                           {entry.userText}
                         </div>
                         {entry.screenshot && (
-                          <div style={{
-                            fontSize: 10, color: '#89b4fa',
-                            display: 'flex', alignItems: 'center', gap: 4,
-                          }}>
+                          <div className="transcript-history-attachment">
                             📸 Screenshot attached
                           </div>
                         )}
                         {/* Status badge */}
-                        <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+                        <div className="transcript-history-status-row">
                           {entry.status === 'pending' && (
-                            <span style={{ fontSize: 10, color: '#6c7086', display: 'flex', alignItems: 'center', gap: 4 }}>
-                              <span style={{
-                                display: 'inline-block', width: 8, height: 8,
-                                border: '1.5px solid #45475a', borderTopColor: '#89b4fa',
-                                borderRadius: '50%', animation: 'spin 0.6s linear infinite',
-                              }} />
+                            <span className="transcript-history-status transcript-history-status-pending">
+                              <span className="transcript-history-spinner transcript-history-spinner-small" />
                               sending…
                             </span>
                           )}
                           {entry.status === 'complete' && (
-                            <span style={{ fontSize: 10, color: '#a6e3a1' }}>✓ sent</span>
+                            <span className="transcript-history-status transcript-history-status-complete">✓ sent</span>
                           )}
                           {entry.status === 'error' && (
-                            <span style={{ fontSize: 10, color: '#f38ba8' }}>✕ failed</span>
+                            <span className="transcript-history-status transcript-history-status-error">✕ failed</span>
                           )}
                         </div>
                       </div>
                       {/* User avatar */}
-                      <div style={{
-                        width: 28, height: 28, borderRadius: '50%',
-                        background: '#45475a', display: 'flex', alignItems: 'center',
-                        justifyContent: 'center', fontSize: 14, flexShrink: 0,
-                      }}>🎙️</div>
+                      <div className="transcript-history-avatar transcript-history-avatar-user" aria-hidden="true">🎙️</div>
                     </div>
 
                     {/* Response — left side */}
-                    <div style={{ display: 'flex', justifyContent: 'flex-start', alignItems: 'flex-end', gap: 8 }}>
+                    <div className="transcript-history-row transcript-history-row-response">
                       {/* Bot avatar */}
-                      <div style={{
-                        width: 28, height: 28, borderRadius: '50%',
-                        background: '#1e1e2e', border: '1px solid #313244',
-                        display: 'flex', alignItems: 'center', justifyContent: 'center',
-                        fontSize: 14, flexShrink: 0,
-                      }}>🤖</div>
-                      <div style={{ maxWidth: '68%' }}>
+                      <div className="transcript-history-avatar transcript-history-avatar-bot" aria-hidden="true">🤖</div>
+                      <div className="transcript-history-response-content">
                         {entry.status === 'pending' ? (
-                          <div style={{
-                            background: '#232336', color: '#6c7086',
-                            borderRadius: '12px 12px 12px 2px',
-                            padding: '8px 12px', fontSize: 13,
-                            display: 'flex', alignItems: 'center', gap: 8,
-                          }}>
-                            <span style={{
-                              width: 10, height: 10, border: '1.5px solid #45475a',
-                              borderTopColor: '#89b4fa', borderRadius: '50%',
-                              display: 'inline-block', animation: 'spin 0.6s linear infinite',
-                              flexShrink: 0,
-                            }} />
+                          <div className="transcript-history-bubble transcript-history-bubble-response transcript-history-bubble-pending">
+                            <span className="transcript-history-spinner transcript-history-spinner-medium" />
                             Processing…
                           </div>
                         ) : entry.status === 'error' ? (
-                          <div style={{
-                            background: 'rgba(243,139,168,0.08)',
-                            border: '1px solid rgba(243,139,168,0.25)',
-                            color: '#f38ba8',
-                            borderRadius: '12px 12px 12px 2px',
-                            padding: '8px 12px', fontSize: 13,
-                          }}>
+                          <div className="transcript-history-bubble transcript-history-bubble-error">
                             ✕ Failed to send
                           </div>
                         ) : entry.response ? (
-                          <div style={{
-                            background: '#232336', color: '#cdd6f4',
-                            borderRadius: '12px 12px 12px 2px',
-                            padding: '8px 12px', fontSize: 13, lineHeight: 1.5,
-                            whiteSpace: 'pre-wrap', wordBreak: 'break-word',
-                          }}>
+                          <div className="transcript-history-bubble transcript-history-bubble-response transcript-history-bubble-text">
                             {entry.response}
                           </div>
                         ) : (
-                          <div style={{
-                            background: '#232336', color: '#a6e3a1',
-                            borderRadius: '12px 12px 12px 2px',
-                            padding: '8px 12px', fontSize: 13,
-                            display: 'flex', alignItems: 'center', gap: 6,
-                          }}>
+                          <div className="transcript-history-bubble transcript-history-bubble-response transcript-history-bubble-sent">
                             ✓ Sent to OpenClaw
                           </div>
                         )}
@@ -282,22 +200,15 @@ export function TranscriptHistoryModal({ onClose }: TranscriptHistoryModalProps)
               );
             })
           )}
-          <div ref={bottomRef} style={{ height: 1 }} />
+          <div ref={bottomRef} className="transcript-history-bottom-anchor" />
         </div>
 
         {/* Scroll to bottom button (shown when not at bottom) */}
         {!isAtBottom && entries.length > 0 && (
-          <div style={{
-            position: 'absolute', bottom: 20, left: '50%', transform: 'translateX(-50%)',
-            zIndex: 1,
-          }}>
+          <div className="transcript-history-scroll-bottom">
             <button
               onClick={() => { bottomRef.current?.scrollIntoView({ behavior: 'smooth' }); setIsAtBottom(true); }}
-              style={{
-                background: '#313244', color: '#cdd6f4', border: '1px solid #45475a',
-                borderRadius: 20, padding: '6px 16px', cursor: 'pointer', fontSize: 12,
-                boxShadow: '0 2px 8px rgba(0,0,0,0.4)',
-              }}
+              className="transcript-history-scroll-bottom-btn"
             >
               ↓ Scroll to bottom
             </button>

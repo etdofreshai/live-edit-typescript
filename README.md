@@ -80,8 +80,8 @@ However, this means:
 
 ### Port Configuration
 
-- **Don't hardcode `port` in `vite.config.ts`** for the Vite dev server. Live Edit assigns ports dynamically (5174-5189) via `--port` CLI flag. If you hardcode a port, it may conflict.
-- If your project has a backend server, use a separate `BACKEND_PORT` env var (not `PORT`, which could conflict with Vite).
+- **Don't hardcode `port` in `vite.config.ts`** for the Vite dev server. Live Edit assigns ports dynamically (5174-5273, 100-slot pool) via `--port` CLI flag. If you hardcode a port, it may conflict.
+- If your project has a backend server, use a separate `BACKEND_PORT` env var (not `PORT`, which could conflict with the Vite dev server or the Live Edit runtime). See [Ports](#ports) below.
 
 ### Full-Stack Projects (Frontend + Backend)
 
@@ -254,10 +254,86 @@ For full-stack:
 
 - **Frontend:** Vite + React + TypeScript (port 5173)
 - **Backend:** Express (port 3000) — API + proxy
-- **Target servers:** Ports 5174-5189, 10-slot LRU cache
+- **Target servers:** Ports 5174-5273 (100-slot pool), LRU cache
 - **Proxy:** `http-proxy` — routes `/proxy/{port}/` to target Vite servers
 - **Webhooks:** Auto-registered on GitHub for "latest" tracking, 30s poll fallback
+- **Shared npm cache:** `LIVE_EDIT_NPM_CACHE` or the OS tmp dir caches npm registry metadata and tarballs only; each repo still installs into its own `node_modules` for lockfile isolation
 - **localStorage:** Persists repo/branch/preview state + env vars per repo
+
+### Security Model
+
+Live Edit clones and runs code from GitHub repos. Preview code should be treated as **untrusted** — it executes on the host as child processes.
+
+**Current mitigations:**
+
+- **Optional admin token** — set `ADMIN_TOKEN` to require a bearer token on privileged routes (run, branch/PR creation, cache deletion, logs, transcripts, uploads). Unset = open access, backwards-compatible.
+- **Input validation** — owner, repo, branch, and SHA are validated with strict regexes before use
+- **`execFileSync`** — all git/npm operations use synchronous exec (no shell injection vectors)
+- **`--ignore-scripts`** — npm install skips `preinstall`/`postinstall` lifecycle scripts
+- **Env allowlist** — child processes only inherit a minimal set of host env vars (`PATH`, `HOME`, `NODE_ENV`, etc.); user-provided env vars are added on top
+- **Safe path handling** — all target directories are resolved and verified to stay inside the `targets/` root
+- **Bounded file walking** — directory tree listing caps depth at 10 levels to prevent runaway traversal
+- **Webhook secret verification** — HMAC-SHA256 signature validation on all incoming webhook payloads
+- **Docker/non-root runtime** — the provided Dockerfile runs as root; for production, add a non-root `USER` directive
+
+**Recommended hardening (not yet implemented):**
+
+- Per-preview containers or sandboxing (e.g., gVisor, nsjail)
+- CPU, memory, and PID quotas per preview process
+- Network egress policy to restrict outbound access from preview servers
+
+### Production Deployment
+
+**Required environment variables:**
+
+| Variable | Purpose |
+|----------|---------|
+| `GITHUB_TOKEN` | Personal access token for cloning repos and registering webhooks. Needs `repo` read scope. |
+| `WEBHOOK_SECRET` | HMAC secret for verifying incoming GitHub webhook payloads. Required when webhooks are enabled. |
+| `WEBHOOK_URL` | Public URL where GitHub should send webhook events. Required for auto-registering hooks. |
+
+**Optional:**
+
+- `LIVE_EDIT_NPM_CACHE` — override the shared npm cache directory (defaults to a temp dir)
+- `ADMIN_TOKEN` — when set, privileged routes require a matching token via `Authorization: Bearer <token>` or `x-admin-token: <token>` header. When unset, all routes are open (no change from previous behavior). This is a lightweight first guardrail, not a full user authentication system. Protected operations include run/run-latest, branch and PR creation, cache deletion, log and file reads, transcript history, and voice/upload routes.
+
+**Browser usage:** The server accepts the token as either `Authorization: Bearer <ADMIN_TOKEN>` or `x-admin-token: <ADMIN_TOKEN>`. A companion UI prompt is planned — once implemented, the browser will store the token in session storage and send it automatically on privileged requests. Until then, use `curl` with one of the header options above.
+
+**Token hygiene:**
+- Do **not** reuse a GitHub personal-access token or any production secret as the admin token.
+- Treat it as a shared admin secret — rotate it on a regular schedule and whenever it may have leaked.
+
+**GitHub token scope:** The token needs read access to repositories in the target org/account. If auto-registering webhooks, it also needs `write:repo_hook` scope.
+
+**Webhook behavior when secrets are missing:**
+
+- No `WEBHOOK_SECRET` in production → webhook endpoint returns 503
+- No `WEBHOOK_SECRET` in development → falls back to an insecure dev placeholder
+- No `GITHUB_TOKEN` or `WEBHOOK_URL` → webhook registration is skipped (30s polling fallback)
+
+### Ports
+
+The platform uses three distinct port ranges, each serving a different purpose:
+
+| Purpose | Default / Range | Configuration |
+|---------|----------------|---------------|
+| API server (Express backend) | `3000` | `PORT=<port>` env var |
+| Frontend dev server (Live Edit UI) | `5173` | internal only |
+| Preview apps (target Vite servers) | `5174-5273` | dynamically assigned |
+
+**API server port.** The Express backend defaults to `3000`. Set `PORT=<port>` (e.g., `PORT=8080 npm run dev`) to run the API server on a different port.
+
+**Preview app port pool.** Each launched preview app receives a port from the `5174-5273` range (100 slots, LRU eviction). This pool is entirely separate from the API server — the two never share ports.
+
+**Project backends must use `BACKEND_PORT`.** When a full-stack project runs its own backend inside a Live Edit preview, it should read `BACKEND_PORT` for its listen port — not `PORT`. The `PORT` variable is reserved for the Vite dev server and Live Edit runtime; using it for a project backend causes port conflicts. This is why the auto-backend plugin example passes `BACKEND_PORT` explicitly.
+
+**Shared npm cache** stores registry metadata and tarballs at `LIVE_EDIT_NPM_CACHE` or the OS temp dir. Each target repo still gets its own `node_modules` for lockfile isolation.
+
+### Env Var Editor
+
+The per-repo env editor (⚙️ button) stores values in **browser localStorage**. This is convenient for development but is not appropriate for highly sensitive secrets — any script running in the same origin can read localStorage.
+
+For real secrets (database credentials, API keys), prefer passing non-secret public config through the editor and using a server-side secret store for sensitive values. A future server-side secrets manager is planned.
 
 ### Docker
 
@@ -271,3 +347,12 @@ CMD ["npm", "run", "dev"]
 ```
 
 No `EXPOSE` needed if your hosting platform handles port forwarding (e.g., Dokploy → port 5173).
+
+### AFK Cleanup
+
+Automated runs leave behind worktrees, branches, and stashes. See [`docs/afk-cleanup.md`](docs/afk-cleanup.md) for the full guide, or run the helper script (lists artifacts by default, does not delete anything):
+
+```bash
+./scripts/afk-cleanup.sh          # dry-run — lists only
+./scripts/afk-cleanup.sh --merged # show branches safe to delete
+```

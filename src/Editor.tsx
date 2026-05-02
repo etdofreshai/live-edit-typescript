@@ -3,27 +3,50 @@ import './styles.css';
 import { VoiceButton } from './VoiceButton';
 import { IframeWithRetry } from './IframeWithRetry';
 import { TranscriptHistoryModal } from './TranscriptHistoryModal';
-
-interface CacheEntry {
-  id: string; repo: string; sha: string; port: number; lastAccessed: number;
-  branch?: string; isLatest?: boolean;
-  commitMessage?: string; commitDate?: string;
-  type?: 'vite' | 'static';
-}
+import { BranchList } from './components/BranchList';
+import { CachePanel } from './components/CachePanel';
+import { CommitList } from './components/CommitList';
+import { EnvModal } from './components/EnvModal';
+import { LogModal } from './components/LogModal';
+import { RepoSelector } from './components/RepoSelector';
+import { StaticFileBrowser } from './components/StaticFileBrowser';
+import { TopBar } from './components/TopBar';
+import { Branch, CacheEntry, Commit, CompareInfo, PullRequestResult, Repo } from './types';
 
 type StartMode = 'vite' | 'npm-dev';
 
 const STORAGE_KEY = 'live-edit-state';
+const DEFAULT_OWNER = 'etdofreshai';
 
 interface PersistedState {
+  selectedOwner?: string;
   selectedRepo: string;
   selectedBranch: string;
   activeEntryId: string | null;
   previewPort: number | null;
   sidebarOpen: boolean;
   // Info needed to auto-re-run after server restart
-  lastRun?: { repo: string; sha: string; branch?: string; isLatest?: boolean } | null;
+  lastRun?: { owner?: string; repo: string; sha: string; branch?: string; isLatest?: boolean } | null;
 }
+
+interface CurrentFile {
+  path: string;
+  content?: string;
+  binary?: boolean;
+}
+
+type RunResponse = CacheEntry & { error?: string };
+
+interface CacheFilesResponse {
+  files?: string[];
+  truncated?: boolean;
+}
+
+interface LogResponse {
+  log?: string;
+}
+
+const errorMessage = (error: unknown): string => error instanceof Error ? error.message : String(error);
 
 function loadPersistedState(): Partial<PersistedState> {
   try {
@@ -37,23 +60,7 @@ function savePersistedState(state: PersistedState) {
   try { localStorage.setItem(STORAGE_KEY, JSON.stringify(state)); } catch {}
 }
 
-const api = (path: string, opts?: RequestInit) => fetch(path, opts).then(r => r.json());
-
-function timeAgo(dateStr: string): string {
-  const now = Date.now();
-  const then = new Date(dateStr).getTime();
-  const sec = Math.floor((now - then) / 1000);
-  if (sec < 60) return 'just now';
-  const min = Math.floor(sec / 60);
-  if (min < 60) return `${min}m ago`;
-  const hr = Math.floor(min / 60);
-  if (hr < 24) return `${hr}h ago`;
-  const days = Math.floor(hr / 24);
-  if (days < 30) return `${days}d ago`;
-  const months = Math.floor(days / 30);
-  if (months < 12) return `${months}mo ago`;
-  return `${Math.floor(months / 12)}y ago`;
-}
+import { api, apiFetch } from './api';
 
 interface EditorProps {
   initialOwner?: string;
@@ -67,11 +74,12 @@ export default function Editor({ initialOwner, initialRepo, initialBranch, initi
   const saved = useRef(loadPersistedState());
   // If URL params are provided, don't restore preview state from localStorage
   const hasUrlParams = !!(initialRepo);
-  const [repos, setRepos] = useState<any[]>([]);
+  const [selectedOwner, setSelectedOwner] = useState(initialOwner || saved.current.selectedOwner || DEFAULT_OWNER);
+  const [repos, setRepos] = useState<Repo[]>([]);
   const [selectedRepo, setSelectedRepo] = useState(initialRepo || saved.current.selectedRepo || '');
-  const [branches, setBranches] = useState<any[]>([]);
+  const [branches, setBranches] = useState<Branch[]>([]);
   const [selectedBranch, setSelectedBranch] = useState(initialBranch || saved.current.selectedBranch || '');
-  const [commits, setCommits] = useState<any[]>([]);
+  const [commits, setCommits] = useState<Commit[]>([]);
   const [cache, setCache] = useState<CacheEntry[]>([]);
   const [previewPort, setPreviewPort] = useState<number | null>(hasUrlParams ? null : (saved.current.previewPort ?? null));
   const [loading, setLoading] = useState('');
@@ -79,16 +87,17 @@ export default function Editor({ initialOwner, initialRepo, initialBranch, initi
   const [sidebarOpen, setSidebarOpen] = useState(saved.current.sidebarOpen ?? true);
   const [activeEntryId, setActiveEntryId] = useState<string | null>(hasUrlParams ? null : (saved.current.activeEntryId ?? null));
   const [files, setFiles] = useState<string[]>([]);
-  const [currentFile, setCurrentFile] = useState<{ path: string; content?: string; binary?: boolean } | null>(null);
+  const [filesTruncated, setFilesTruncated] = useState(false);
+  const [currentFile, setCurrentFile] = useState<CurrentFile | null>(null);
   const [expandedDirs, setExpandedDirs] = useState<Set<string>>(new Set());
   const [restoringState, setRestoringState] = useState(true);
   const [urlUsedLatest, setUrlUsedLatest] = useState(initialCommit === 'latest');
   const [branchFrom, setBranchFrom] = useState<string | null>(null);
   const [newBranchName, setNewBranchName] = useState('');
   const [branchError, setBranchError] = useState('');
-  const [compareInfo, setCompareInfo] = useState<{ ahead: number; behind: number; defaultBranch: string } | null>(null);
+  const [compareInfo, setCompareInfo] = useState<CompareInfo | null>(null);
   const [prLoading, setPrLoading] = useState(false);
-  const [prResult, setPrResult] = useState<{ url: string; number: number } | null>(null);
+  const [prResult, setPrResult] = useState<PullRequestResult | null>(null);
   const [prError, setPrError] = useState('');
   const [showEnvModal, setShowEnvModal] = useState(false);
   const [showLogModal, setShowLogModal] = useState(false);
@@ -112,7 +121,7 @@ export default function Editor({ initialOwner, initialRepo, initialBranch, initi
     
     let path = '/edit';
     if (selectedRepo) {
-      path += `/etdofreshai/${selectedRepo}`;
+      path += `/${selectedOwner}/${selectedRepo}`;
       if (selectedBranch) {
         path += `/${selectedBranch}`;
         if (activeEntry?.sha && activeEntry.repo === selectedRepo) {
@@ -128,7 +137,7 @@ export default function Editor({ initialOwner, initialRepo, initialBranch, initi
     if (currentPath !== path) {
       onNavigateRef.current(path);
     }
-  }, [selectedRepo, selectedBranch, activeEntry?.sha, restoringState, urlUsedLatest]);
+  }, [selectedOwner, selectedRepo, selectedBranch, activeEntry?.sha, restoringState, urlUsedLatest]);
 
   // Handle initial commit from URL
   useEffect(() => {
@@ -146,10 +155,11 @@ export default function Editor({ initialOwner, initialRepo, initialBranch, initi
           // Run latest commit on this branch (same as clicking "▶ Latest")
           if (activeEntry?.isLatest && activeEntry.repo === initialRepo && activeEntry.branch === initialBranch) return;
           setLoading('latest');
-          entry = await api('/api/run-latest', {
+          entry = await api<RunResponse>('/api/run-latest', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
+              owner: initialOwner || DEFAULT_OWNER,
               repo: initialRepo,
               branch: initialBranch,
               envVars: parseEnvText(envText),
@@ -160,10 +170,11 @@ export default function Editor({ initialOwner, initialRepo, initialBranch, initi
           // Run specific commit
           if (activeEntry?.sha === initialCommit) return;
           setLoading(initialCommit);
-          entry = await api('/api/run', {
+          entry = await api<RunResponse>('/api/run', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ 
+              owner: initialOwner || DEFAULT_OWNER,
               repo: initialRepo, 
               sha: initialCommit,
               envVars: parseEnvText(envText),
@@ -179,21 +190,22 @@ export default function Editor({ initialOwner, initialRepo, initialBranch, initi
         
         await refreshCache();
         await showEntry(entry);
-      } catch (e: any) {
-        setError(e.message);
+      } catch (e: unknown) {
+        setError(errorMessage(e));
       } finally {
         setLoading('');
       }
     };
     
     runInitialCommit();
-  }, [initialCommit, initialRepo, initialBranch, restoringState, repos.length]);
+  }, [initialOwner, initialCommit, initialRepo, initialBranch, restoringState, repos.length]);
 
   // Load env vars for selected repo
   useEffect(() => {
     if (selectedRepo) {
+      const key = `${selectedOwner}/${selectedRepo}`;
       try {
-        const stored = localStorage.getItem(`env:${selectedRepo}`);
+        const stored = localStorage.getItem(`env:${key}`);
         if (stored) {
           // Migrate old JSON format to text
           try { const obj = JSON.parse(stored); if (typeof obj === 'object' && !Array.isArray(obj)) { setEnvText(Object.entries(obj).map(([k,v]) => `${k}=${v}`).join('\n')); return; } } catch {}
@@ -205,13 +217,13 @@ export default function Editor({ initialOwner, initialRepo, initialBranch, initi
         setEnvText('');
       }
       try {
-        const mode = localStorage.getItem(`startMode:${selectedRepo}`) as StartMode;
+        const mode = localStorage.getItem(`startMode:${key}`) as StartMode;
         setStartMode(mode || 'vite');
       } catch {
         setStartMode('vite');
       }
     }
-  }, [selectedRepo]);
+  }, [selectedOwner, selectedRepo]);
 
   const parseEnvText = (text: string): Record<string, string> => {
     const vars: Record<string, string> = {};
@@ -228,7 +240,7 @@ export default function Editor({ initialOwner, initialRepo, initialBranch, initi
     if (!selectedRepo) return;
     setEnvText(text);
     try {
-      localStorage.setItem(`env:${selectedRepo}`, text);
+      localStorage.setItem(`env:${selectedOwner}/${selectedRepo}`, text);
     } catch {}
   };
 
@@ -236,23 +248,26 @@ export default function Editor({ initialOwner, initialRepo, initialBranch, initi
     if (!selectedRepo) return;
     setStartMode(mode);
     try {
-      localStorage.setItem(`startMode:${selectedRepo}`, mode);
+      localStorage.setItem(`startMode:${selectedOwner}/${selectedRepo}`, mode);
     } catch {}
   };
 
   // Persist state on changes
   useEffect(() => {
     if (restoringState) return;
-    const lastRun = activeEntry ? { repo: activeEntry.repo, sha: activeEntry.sha, branch: activeEntry.branch, isLatest: activeEntry.isLatest } : null;
-    savePersistedState({ selectedRepo, selectedBranch, activeEntryId, previewPort, sidebarOpen, lastRun });
-  }, [selectedRepo, selectedBranch, activeEntryId, previewPort, sidebarOpen, restoringState, activeEntry]);
+    const lastRun = activeEntry ? { owner: activeEntry.owner, repo: activeEntry.repo, sha: activeEntry.sha, branch: activeEntry.branch, isLatest: activeEntry.isLatest } : null;
+    savePersistedState({ selectedOwner, selectedRepo, selectedBranch, activeEntryId, previewPort, sidebarOpen, lastRun });
+  }, [selectedOwner, selectedRepo, selectedBranch, activeEntryId, previewPort, sidebarOpen, restoringState, activeEntry]);
 
   const showEntry = async (entry: CacheEntry) => {
     setActiveEntryId(entry.id);
     if (entry.type === 'static') {
       setPreviewPort(null);
-      const fileList = await api(`/api/cache/${entry.id}/files`);
-      setFiles(fileList);
+      try {
+        const result = await api<CacheFilesResponse | string[]>(`/api/cache/${entry.id}/files`);
+        setFiles(Array.isArray(result) ? result : result.files ?? []);
+        setFilesTruncated(!Array.isArray(result) && !!result.truncated);
+      } catch {}
       setCurrentFile(null);
       setExpandedDirs(new Set());
     } else {
@@ -262,7 +277,7 @@ export default function Editor({ initialOwner, initialRepo, initialBranch, initi
 
   const viewFile = async (cacheId: string, filePath: string) => {
     try {
-      const data = await api(`/api/cache/${cacheId}/files/${encodeURIComponent(filePath)}`);
+      const data = await api<CurrentFile>(`/api/cache/${cacheId}/files/${encodeURIComponent(filePath)}`);
       setCurrentFile(data);
     } catch {
       setCurrentFile({ path: filePath, binary: true });
@@ -273,21 +288,23 @@ export default function Editor({ initialOwner, initialRepo, initialBranch, initi
   useEffect(() => {
     const init = async () => {
       try {
-        const [repoList, cacheList] = await Promise.all([api('/api/repos'), api('/api/cache')]);
+        const ownerForLoad = initialOwner || saved.current.selectedOwner || DEFAULT_OWNER;
+        setSelectedOwner(ownerForLoad);
+        const [repoList, cacheList] = await Promise.all([api<Repo[]>(`/api/repos/${ownerForLoad}`), api<CacheEntry[]>('/api/cache')]);
         setRepos(repoList);
         setCache(cacheList);
 
         const s = saved.current;
         if (s.selectedRepo) {
-          const repoExists = repoList.some((r: any) => r.name === s.selectedRepo);
+          const repoExists = repoList.some((r: Repo) => r.name === s.selectedRepo);
           if (repoExists) {
-            const branchList = await api(`/api/repos/${s.selectedRepo}/branches`);
+            const branchList = await api<Branch[]>(`/api/repos/${ownerForLoad}/${s.selectedRepo}/branches`);
             setBranches(branchList);
 
             if (s.selectedBranch) {
-              const branchExists = branchList.some((b: any) => b.name === s.selectedBranch);
+              const branchExists = branchList.some((b: Branch) => b.name === s.selectedBranch);
               if (branchExists) {
-                const commitList = await api(`/api/repos/${s.selectedRepo}/branches/${encodeURIComponent(s.selectedBranch)}/commits`);
+                const commitList = await api<Commit[]>(`/api/repos/${ownerForLoad}/${s.selectedRepo}/branches/${encodeURIComponent(s.selectedBranch)}/commits`);
                 setCommits(commitList);
               } else {
                 setSelectedBranch('');
@@ -302,25 +319,25 @@ export default function Editor({ initialOwner, initialRepo, initialBranch, initi
         // Validate active entry still exists in cache — if not, auto-re-run
         // Skip restore when URL params are provided (URL is source of truth)
         if (s.activeEntryId && !hasUrlParams) {
-          const entryExists = cacheList.some((e: CacheEntry) => e.id === s.activeEntryId);
+                const entryExists = cacheList.some((e: CacheEntry) => e.id === s.activeEntryId);
           if (!entryExists && s.lastRun) {
             // Server restarted — re-run the last entry
             setLoading('restoring');
             try {
               let entry;
               if (s.lastRun.isLatest && s.lastRun.branch) {
-                entry = await api('/api/run-latest', {
+                entry = await api<RunResponse>('/api/run-latest', {
                   method: 'POST', headers: { 'Content-Type': 'application/json' },
-                  body: JSON.stringify({ repo: s.lastRun.repo, branch: s.lastRun.branch }),
+                  body: JSON.stringify({ owner: s.lastRun.owner || DEFAULT_OWNER, repo: s.lastRun.repo, branch: s.lastRun.branch }),
                 });
               } else {
-                entry = await api('/api/run', {
+                entry = await api<RunResponse>('/api/run', {
                   method: 'POST', headers: { 'Content-Type': 'application/json' },
-                  body: JSON.stringify({ repo: s.lastRun.repo, sha: s.lastRun.sha }),
+                  body: JSON.stringify({ owner: s.lastRun.owner || DEFAULT_OWNER, repo: s.lastRun.repo, sha: s.lastRun.sha }),
                 });
               }
               if (entry && !entry.error) {
-                setCache(await api('/api/cache'));
+                setCache(await api<CacheEntry[]>('/api/cache'));
                 await showEntry(entry);
               } else {
                 setActiveEntryId(null);
@@ -336,8 +353,8 @@ export default function Editor({ initialOwner, initialRepo, initialBranch, initi
             setPreviewPort(null);
           }
         }
-      } catch (e: any) {
-        setError(e.message);
+      } catch (e: unknown) {
+        setError(errorMessage(e));
       } finally {
         setRestoringState(false);
       }
@@ -345,10 +362,16 @@ export default function Editor({ initialOwner, initialRepo, initialBranch, initi
     init();
   }, []);
 
-  const refreshCache = () => api('/api/cache').then((newCache: CacheEntry[]) => {
+  const loadReposForOwner = async (owner: string) => {
+    const repoList = await api<Repo[]>(`/api/repos/${owner}`);
+    setRepos(repoList);
+    return repoList;
+  };
+
+  const refreshCache = () => api<CacheEntry[]>('/api/cache').then((newCache) => {
     setCache(prev => {
       // Compare ignoring volatile fields (lastAccessed changes on every request)
-      const strip = (entries: CacheEntry[]) => entries.map(({ lastAccessed, ...rest }) => rest);
+      const strip = (entries: CacheEntry[]) => entries.map(({ lastAccessed: _, ...rest }) => rest);
       const prevJson = JSON.stringify(strip(prev));
       const newJson = JSON.stringify(strip(newCache));
       return prevJson === newJson ? prev : newCache;
@@ -357,30 +380,53 @@ export default function Editor({ initialOwner, initialRepo, initialBranch, initi
 
   const selectRepo = async (name: string) => {
     setSelectedRepo(name); setSelectedBranch(''); setCommits([]);
-    
+
     // Update URL immediately when repo is selected
     if (onNavigate) {
-      onNavigate(`/edit/etdofreshai/${name}`);
+      onNavigate(`/edit/${selectedOwner}/${name}`);
     }
-    
-    const branchList = await api(`/api/repos/${name}/branches`);
-    setBranches(branchList);
 
-    // Auto-select branch: prefer one that's already running in cache, else default branch
-    const cachedEntry = cache.find(e => e.repo === name);
-    const cachedBranch = cachedEntry?.branch;
-    const defaultBranch = branchList.find((b: any) => b.name === 'main')?.name
-      || branchList.find((b: any) => b.name === 'master')?.name
-      || branchList[0]?.name;
-    const autoSelect = (cachedBranch && branchList.some((b: any) => b.name === cachedBranch))
-      ? cachedBranch : defaultBranch;
-    if (autoSelect) selectBranch(autoSelect);
+    try {
+      const branchList = await api<Branch[]>(`/api/repos/${selectedOwner}/${name}/branches`);
+      setBranches(branchList);
+
+      // Auto-select branch: prefer one that's already running in cache, else default branch
+      const cachedEntry = cache.find(e => e.owner === selectedOwner && e.repo === name);
+      const cachedBranch = cachedEntry?.branch;
+      const defaultBranch = branchList.find((b: Branch) => b.name === 'main')?.name
+        || branchList.find((b: Branch) => b.name === 'master')?.name
+        || branchList[0]?.name;
+      const autoSelect = (cachedBranch && branchList.some((b: Branch) => b.name === cachedBranch))
+        ? cachedBranch : defaultBranch;
+      if (autoSelect) selectBranch(autoSelect);
+    } catch {}
+  };
+
+  const changeOwner = async (owner: string) => {
+    setSelectedOwner(owner);
+    setSelectedRepo('');
+    setSelectedBranch('');
+    setBranches([]);
+    setCommits([]);
+    setCompareInfo(null);
+    setPrResult(null);
+    setPrError('');
+    if (onNavigate) onNavigate('/edit');
+    if (!owner) {
+      setRepos([]);
+      return;
+    }
+    try {
+      await loadReposForOwner(owner);
+    } catch (e: unknown) {
+      setError(errorMessage(e));
+    }
   };
 
   const handleCreateBranch = async (fromBranch: string, name: string) => {
     setBranchError('');
     try {
-      const res = await fetch(`/api/repos/${selectedRepo}/branches`, {
+      const res = await apiFetch(`/api/repos/${selectedOwner}/${selectedRepo}/branches`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ name, from: fromBranch }),
@@ -389,9 +435,9 @@ export default function Editor({ initialOwner, initialRepo, initialBranch, initi
       if (!res.ok) { setBranchError(data.error || 'Failed to create branch'); return; }
       setBranchFrom(null);
       setNewBranchName('');
-      setBranches(await api(`/api/repos/${selectedRepo}/branches`));
+      setBranches(await api<Branch[]>(`/api/repos/${selectedOwner}/${selectedRepo}/branches`));
       selectBranch(name);
-    } catch (e: any) { setBranchError(e.message); }
+    } catch (e: unknown) { setBranchError(errorMessage(e)); }
   };
 
   const selectBranch = async (branch: string) => {
@@ -399,18 +445,20 @@ export default function Editor({ initialOwner, initialRepo, initialBranch, initi
     setPrResult(null);
     setPrError('');
     setCompareInfo(null);
-    
+
     // Update URL when branch is selected
     if (onNavigate && selectedRepo) {
-      onNavigate(`/edit/etdofreshai/${selectedRepo}/${branch}`);
+      onNavigate(`/edit/${selectedOwner}/${selectedRepo}/${branch}`);
     }
-    
-    const [commitList, cmp] = await Promise.all([
-      api(`/api/repos/${selectedRepo}/branches/${encodeURIComponent(branch)}/commits`),
-      api(`/api/repos/${selectedRepo}/branches/${encodeURIComponent(branch)}/compare`).catch(() => null),
-    ]);
-    setCommits(commitList);
-    if (cmp && !cmp.error) setCompareInfo(cmp);
+
+    try {
+      const [commitList, cmp] = await Promise.all([
+        api<Commit[]>(`/api/repos/${selectedOwner}/${selectedRepo}/branches/${encodeURIComponent(branch)}/commits`),
+        api<CompareInfo & { error?: string }>(`/api/repos/${selectedOwner}/${selectedRepo}/branches/${encodeURIComponent(branch)}/compare`).catch(() => null),
+      ]);
+      setCommits(commitList);
+      if (cmp && !cmp.error) setCompareInfo(cmp);
+    } catch {}
   };
 
   const handleCreatePR = async () => {
@@ -419,7 +467,7 @@ export default function Editor({ initialOwner, initialRepo, initialBranch, initi
     setPrError('');
     setPrResult(null);
     try {
-      const res = await api(`/api/repos/${selectedRepo}/pulls`, {
+      const res = await api<PullRequestResult>(`/api/repos/${selectedOwner}/${selectedRepo}/pulls`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -430,48 +478,75 @@ export default function Editor({ initialOwner, initialRepo, initialBranch, initi
       });
       if (res.error) { setPrError(res.error); return; }
       setPrResult(res);
-    } catch (e: any) { setPrError(e.message); }
+    } catch (e: unknown) { setPrError(errorMessage(e)); }
     finally { setPrLoading(false); }
   };
 
   const run = async (sha: string) => {
     setLoading(sha); setError(''); setSidebarOpen(false); setUrlUsedLatest(false);
     try {
-      const entry = await api('/api/run', {
+      const entry = await api<RunResponse>('/api/run', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ repo: selectedRepo, sha, envVars: parseEnvText(envText), startMode }),
+        body: JSON.stringify({ owner: selectedOwner, repo: selectedRepo, sha, envVars: parseEnvText(envText), startMode }),
       });
       if (entry.error) { setError(entry.error); return; }
       await refreshCache();
       await showEntry(entry);
-    } catch (e: any) { setError(e.message); }
+    } catch (e: unknown) { setError(errorMessage(e)); }
     finally { setLoading(''); }
   };
 
   const runLatest = async () => {
     setLoading('latest'); setError(''); setSidebarOpen(false); setUrlUsedLatest(true);
     try {
-      const entry = await api('/api/run-latest', {
+      const entry = await api<RunResponse>('/api/run-latest', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ repo: selectedRepo, branch: selectedBranch, envVars: parseEnvText(envText), startMode }),
+        body: JSON.stringify({ owner: selectedOwner, repo: selectedRepo, branch: selectedBranch, envVars: parseEnvText(envText), startMode }),
       });
       if (entry.error) { setError(entry.error); return; }
       await refreshCache();
       await showEntry(entry);
-    } catch (e: any) { setError(e.message); }
+    } catch (e: unknown) { setError(errorMessage(e)); }
     finally { setLoading(''); }
   };
 
   useEffect(() => {
-    const interval = setInterval(refreshCache, 5000);
-    return () => clearInterval(interval);
+    let es: EventSource | null = null;
+    let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+
+    const connect = () => {
+      es = new EventSource('/api/cache/stream');
+      es.onmessage = (ev) => {
+        try {
+          const newCache: CacheEntry[] = JSON.parse(ev.data);
+          setCache(prev => {
+            const strip = (entries: CacheEntry[]) => entries.map(({ lastAccessed: _, ...rest }) => rest);
+            const prevJson = JSON.stringify(strip(prev));
+            const newJson = JSON.stringify(strip(newCache));
+            return prevJson === newJson ? prev : newCache;
+          });
+        } catch {}
+      };
+      es.onerror = () => {
+        es?.close();
+        es = null;
+        refreshCache().catch(() => {});
+        reconnectTimer = setTimeout(connect, 5000);
+      };
+    };
+    connect();
+
+    return () => {
+      es?.close();
+      if (reconnectTimer) clearTimeout(reconnectTimer);
+    };
   }, []);
 
   // Poll transcript count for sidebar badge
   useEffect(() => {
     const fetchCount = async () => {
       try {
-        const res = await fetch('/api/transcript-history');
+        const res = await apiFetch('/api/transcript-history');
         if (res.ok) {
           const data = await res.json();
           setTranscriptCount(Array.isArray(data) ? data.length : 0);
@@ -492,18 +567,19 @@ export default function Editor({ initialOwner, initialRepo, initialBranch, initi
     
     const setupConsoleInterception = () => {
       try {
-        const iframeWindow = iframe.contentWindow;
+        const iframeWindow = iframe.contentWindow as (Window & typeof globalThis) | null;
         if (!iframeWindow) return;
+        const iframeConsole = (iframeWindow as Window & typeof globalThis).console;
 
         const originalConsole = {
-          log: iframeWindow.console.log,
-          warn: iframeWindow.console.warn,
-          error: iframeWindow.console.error,
+          log: iframeConsole.log,
+          warn: iframeConsole.warn,
+          error: iframeConsole.error,
         };
 
-        const addToBuffer = (level: string, args: any[]) => {
+        const addToBuffer = (level: string, args: unknown[]) => {
           const timestamp = new Date().toLocaleTimeString();
-          const message = `[${timestamp}] [${level}] ${args.map(arg => 
+          const message = `[${timestamp}] [${level}] ${args.map(arg =>
             typeof arg === 'object' ? JSON.stringify(arg) : String(arg)
           ).join(' ')}`;
           buffer.push(message);
@@ -511,21 +587,21 @@ export default function Editor({ initialOwner, initialRepo, initialBranch, initi
           setConsoleLogs([...buffer]);
         };
 
-        iframeWindow.console.log = function(...args: any[]) {
+        iframeConsole.log = function(...args: unknown[]) {
           addToBuffer('log', args);
           originalConsole.log.apply(this, args);
         };
 
-        iframeWindow.console.warn = function(...args: any[]) {
+        iframeConsole.warn = function(...args: unknown[]) {
           addToBuffer('warn', args);
           originalConsole.warn.apply(this, args);
         };
 
-        iframeWindow.console.error = function(...args: any[]) {
+        iframeConsole.error = function(...args: unknown[]) {
           addToBuffer('error', args);
           originalConsole.error.apply(this, args);
         };
-      } catch (e) {
+      } catch {
         // Cross-origin iframe - can't access contentWindow
         console.warn('Cannot intercept console logs: cross-origin iframe');
       }
@@ -541,226 +617,83 @@ export default function Editor({ initialOwner, initialRepo, initialBranch, initi
     return () => {
       iframe.removeEventListener('load', onLoad);
     };
-  }, [previewPort]); // eslint-disable-line -- iframeRef is stable
+  }, [previewPort]);
 
   const remove = async (id: string) => {
-    await api(`/api/cache/${id}`, { method: 'DELETE' });
-    refreshCache();
+    try { await api(`/api/cache/${id}`, { method: 'DELETE' }); } catch {}
+    refreshCache().catch(() => {});
+  };
+
+  const refreshLog = async () => {
+    if (!activeEntry) return;
+    try {
+      const res = await api<LogResponse>(`/api/cache/${activeEntry.id}/log`);
+      setLogContent(res.log || '(no log output)');
+    } catch {
+      setLogContent('(failed to fetch log)');
+    }
   };
 
   return (
     <div className="app-container">
       {showHeader && (
-        <div className="top-bar">
-          <span className={`dot ${previewPort || activeEntry?.type === 'static' ? 'green' : 'gray'}`} />
-          {activeEntry ? (
-            <div className="top-bar-info">
-              <span className="tb-owner">
-                <a href="https://github.com/etdofreshai" target="_blank" rel="noopener noreferrer" style={{ color: '#6b7280', textDecoration: 'none' }}>etdofreshai</a>
-                <span style={{ color: '#555', margin: '0 2px' }}>/</span>
-              </span>
-              <span className="tb-repo">
-                <a href={`https://github.com/etdofreshai/${activeEntry.repo}`} target="_blank" rel="noopener noreferrer" style={{ color: '#cdd6f4', textDecoration: 'none' }}>etdofreshai/{activeEntry.repo}</a>
-              </span>
-              {activeEntry.branch && (
-                <span className="tb-branch">
-                  <span style={{ color: '#555', margin: '0 4px' }}>@</span>
-                  <a href={`https://github.com/etdofreshai/${activeEntry.repo}/tree/${activeEntry.branch}`} target="_blank" rel="noopener noreferrer" style={{ color: '#a6e3a1', textDecoration: 'none' }}>{activeEntry.branch}</a>
-                </span>
-              )}
-              <span className="tb-sha">
-                <span style={{ color: '#555', margin: '0 4px' }}>·</span>
-                <a href={`https://github.com/etdofreshai/${activeEntry.repo}/commit/${activeEntry.sha}`} target="_blank" rel="noopener noreferrer" style={{ color: '#89b4fa', fontFamily: 'monospace', textDecoration: 'none' }}>{activeEntry.sha.slice(0, 7)}</a>
-              </span>
-              {activeEntry.commitDate && (
-                <span className="tb-time" title={new Date(activeEntry.commitDate).toLocaleString()}>{timeAgo(activeEntry.commitDate)}</span>
-              )}
-              {activeEntry.commitMessage && (
-                <span className="tb-msg" style={{ color: '#cdd6f4' }}>{activeEntry.commitMessage.slice(0, 50)}{activeEntry.commitMessage.length > 50 ? '…' : ''}</span>
-              )}
-              <span className="tb-port" style={{ color: '#6b7280', marginLeft: 4 }}>
-                {previewPort ? `:${previewPort}` : activeEntry.type === 'static' ? 'static' : ''}
-              </span>
-            </div>
-          ) : <a href="/" style={{ color: 'inherit', textDecoration: 'none' }}>Live Edit TypeScript</a>}
-          <div className="top-bar-controls">
-            <button className="top-bar-btn" onClick={() => { if (activeEntry) { setSelectedRepo(activeEntry.repo); setShowEnvModal(true); } }} title="Environment variables">⚙️ Env</button>
-            <button className="top-bar-btn" onClick={async () => {
-              if (!activeEntry) return;
-              try { const res = await api(`/api/cache/${activeEntry.id}/log`); setLogContent(res.log || '(no log output)'); } catch { setLogContent('(failed to fetch log)'); }
-              setShowLogModal(true);
-            }} title="Server log">📋 Log</button>
-            <button className="top-bar-btn" onClick={() => setSidebarOpen(o => !o)} title={sidebarOpen ? 'Hide sidebar' : 'Show sidebar'}>{sidebarOpen ? '✕' : '☰'}</button>
-            <button className="top-bar-btn" onClick={() => setShowHeader(false)} title="Hide top bar">▲</button>
-          </div>
-        </div>
+        <TopBar
+          activeEntry={activeEntry}
+          previewPort={previewPort}
+          sidebarOpen={sidebarOpen}
+          onShowEnvModal={() => { if (activeEntry) { setSelectedOwner(activeEntry.owner); setSelectedRepo(activeEntry.repo); setShowEnvModal(true); } }}
+          onShowLogModal={async () => { await refreshLog(); setShowLogModal(true); }}
+          onToggleSidebar={() => setSidebarOpen(o => !o)}
+          onHideHeader={() => setShowHeader(false)}
+        />
       )}
       {!showHeader && (
         <button
+          className="show-top-bar-btn"
           onClick={() => setShowHeader(true)}
-          style={{ position: 'fixed', top: 6, right: 6, zIndex: 200, background: 'rgba(26,26,46,0.85)', color: '#6b7280', border: '1px solid #3a3a5e', borderRadius: 6, padding: '2px 8px', cursor: 'pointer', fontSize: 12 }}
           title="Show top bar"
         >▼</button>
       )}
 
       <div className="main-content">
       <div className={`sidebar ${sidebarOpen ? '' : 'collapsed'}`}>
-        <h2><a href="/" style={{ color: 'inherit', textDecoration: 'none' }}>Live Edit TypeScript</a></h2>
+        <h2><a className="sidebar-home-link" href="/">Live Edit TypeScript</a></h2>
         {error && <div className="error-banner">{error}</div>}
 
-        <h3>Repos</h3>
-        <div className="list-panel">
-          <div className="list-panel-scroll">
-            {repos.map((r: any) => (
-              <div key={r.name}
-                className={`list-item ${r.name === selectedRepo ? 'active' : ''}`}
-                style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}
-                onClick={() => selectRepo(r.name)}>
-                <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{r.name}</span>
-                <a
-                  href={`https://github.com/etdofreshai/${r.name}`}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  onClick={e => e.stopPropagation()}
-                  style={{ color: '#6b7280', fontSize: 11, textDecoration: 'none', flexShrink: 0, padding: '0 4px' }}
-                  title="View on GitHub"
-                >↗</a>
-              </div>
-            ))}
-          </div>
-        </div>
+        <RepoSelector owner={selectedOwner} repos={repos} selectedRepo={selectedRepo} onOwnerChange={changeOwner} onSelectRepo={selectRepo} />
 
-        {branches.length > 0 && <>
-          <h3>Branches — {selectedRepo}</h3>
-          <div className="list-panel">
-            <div className="list-panel-scroll">
-              {branches.map((b: any) => (
-                <div key={b.name}>
-                  <div
-                    className={`list-item ${b.name === selectedBranch ? 'active' : ''}`}
-                    style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}
-                    onClick={() => selectBranch(b.name)}>
-                    <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{b.name}</span>
-                    <div style={{ display: 'flex', gap: 2, flexShrink: 0 }}>
-                      <a
-                        href={`https://github.com/etdofreshai/${selectedRepo}/tree/${b.name}`}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        onClick={e => e.stopPropagation()}
-                        style={{ color: '#6b7280', fontSize: 11, textDecoration: 'none', padding: '0 4px' }}
-                        title="View on GitHub"
-                      >↗</a>
-                      <button
-                        onClick={(e) => { e.stopPropagation(); setBranchFrom(branchFrom === b.name ? null : b.name); setNewBranchName(`${b.name}-dev-${crypto.randomUUID().slice(0, 6)}`); setBranchError(''); }}
-                        style={{ background: 'none', border: 'none', color: '#6b7280', cursor: 'pointer', fontSize: 14, padding: '0 4px', flexShrink: 0, lineHeight: 1 }}
-                        title="Create branch from here"
-                      >⑂</button>
-                    </div>
-                  </div>
-                  {branchFrom === b.name && (
-                    <div style={{ padding: '4px 8px 8px', display: 'flex', gap: 4, alignItems: 'center' }}>
-                      <input
-                        autoFocus
-                        value={newBranchName}
-                        onChange={e => setNewBranchName(e.target.value)}
-                        onKeyDown={e => { if (e.key === 'Enter' && newBranchName.trim()) handleCreateBranch(b.name, newBranchName.trim()); if (e.key === 'Escape') setBranchFrom(null); }}
-                        placeholder="new-branch-name"
-                        style={{ flex: 1, background: '#1a1a2e', border: '1px solid #3a3a5e', borderRadius: 4, color: '#cdd6f4', padding: '3px 6px', fontSize: 12, outline: 'none', minWidth: 0 }}
-                        onClick={e => e.stopPropagation()}
-                      />
-                      <button
-                        onClick={(e) => { e.stopPropagation(); if (newBranchName.trim()) handleCreateBranch(b.name, newBranchName.trim()); }}
-                        style={{ background: '#a6e3a1', color: '#1a1a2e', border: 'none', borderRadius: 4, padding: '3px 8px', fontSize: 12, cursor: 'pointer', fontWeight: 600, flexShrink: 0 }}
-                      >Create</button>
-                    </div>
-                  )}
-                  {branchFrom === b.name && branchError && (
-                    <div style={{ padding: '0 8px 6px', color: '#f38ba8', fontSize: 11 }}>{branchError}</div>
-                  )}
-                </div>
-              ))}
-            </div>
-          </div>
-        </>}
+        <BranchList
+          owner={selectedOwner}
+          branches={branches}
+          selectedRepo={selectedRepo}
+          selectedBranch={selectedBranch}
+          branchFrom={branchFrom}
+          newBranchName={newBranchName}
+          branchError={branchError}
+          onSelectBranch={selectBranch}
+          onSetBranchFrom={setBranchFrom}
+          onSetNewBranchName={setNewBranchName}
+          onSetBranchError={setBranchError}
+          onCreateBranch={handleCreateBranch}
+        />
 
-        {commits.length > 0 && <>
-          <h3 style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
-            <span>Commits — {selectedRepo} / {selectedBranch}</span>
-            {compareInfo && compareInfo.ahead > 0 && (
-              <span style={{ fontSize: 11, background: '#89b4fa22', color: '#89b4fa', padding: '2px 8px', borderRadius: 10, fontWeight: 500 }}>
-                {compareInfo.ahead} ahead
-              </span>
-            )}
-            {compareInfo && compareInfo.ahead > 0 && !prResult && (
-              <button
-                onClick={handleCreatePR}
-                disabled={prLoading}
-                style={{ fontSize: 11, background: '#a6e3a122', color: '#a6e3a1', border: '1px solid #a6e3a144', borderRadius: 6, padding: '2px 10px', cursor: 'pointer', fontWeight: 600 }}
-              >
-                {prLoading ? '…' : `🔀 PR → ${compareInfo.defaultBranch}`}
-              </button>
-            )}
-            {prResult && (
-              <a href={prResult.url} target="_blank" rel="noopener noreferrer"
-                style={{ fontSize: 11, color: '#a6e3a1', textDecoration: 'none' }}>
-                ✓ PR #{prResult.number}
-              </a>
-            )}
-            {prError && (
-              <span style={{ fontSize: 11, color: '#f38ba8' }}>{prError.slice(0, 80)}</span>
-            )}
-            <select
-              value={startMode}
-              onChange={e => saveStartMode(e.target.value as StartMode)}
-              style={{ fontSize: 11, background: '#1a1a2e', color: '#cdd6f4', border: '1px solid #3a3a5e', borderRadius: 6, padding: '2px 8px', cursor: 'pointer', marginLeft: 'auto' }}
-            >
-              <option value="vite">Vite</option>
-              <option value="npm-dev">npm run dev</option>
-            </select>
-            <button
-              onClick={() => setShowEnvModal(true)}
-              style={{ fontSize: 11, background: 'transparent', color: '#cdd6f4', border: '1px solid #3a3a5e', borderRadius: 6, padding: '2px 10px', cursor: 'pointer', fontWeight: 600 }}
-            >
-              ⚙️ Env
-            </button>
-          </h3>
-          <div className="list-panel">
-            <div className="list-panel-scroll tall">
-              <div className="latest-entry">
-                <div className="commit-info">
-                  <div className="latest-label">▶ Latest</div>
-                  <div className="latest-desc">Track {selectedBranch} — auto-updates on new commits</div>
-                </div>
-                <button className="btn-run green" onClick={runLatest} disabled={!!loading}>
-                  {loading === 'latest' ? <span className="spinner" /> : '▶ Run'}
-                </button>
-              </div>
-              {commits.map((c: any) => (
-                <div key={c.sha} className="commit-item">
-                  <div className="commit-info">
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
-                      <div className="commit-sha">{c.sha.slice(0, 7)}</div>
-                      <a
-                        href={`https://github.com/etdofreshai/${selectedRepo}/commit/${c.sha}`}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        style={{ color: '#6b7280', fontSize: 10, textDecoration: 'none' }}
-                        title="View on GitHub"
-                      >↗</a>
-                    </div>
-                    <div className="commit-msg">{c.commit?.message?.split('\n')[0]}</div>
-                    {c.commit?.author?.date && (
-                      <div style={{ color: '#6b7280', fontSize: 11 }} title={new Date(c.commit.author.date).toLocaleString()}>{timeAgo(c.commit.author.date)}</div>
-                    )}
-                  </div>
-                  <button className="btn-run" onClick={() => run(c.sha)} disabled={!!loading}>
-                    {loading === c.sha ? <span className="spinner" /> : '▶ Run'}
-                  </button>
-                </div>
-              ))}
-            </div>
-          </div>
-        </>}
+        <CommitList
+          owner={selectedOwner}
+          commits={commits}
+          selectedRepo={selectedRepo}
+          selectedBranch={selectedBranch}
+          compareInfo={compareInfo}
+          prLoading={prLoading}
+          prResult={prResult}
+          prError={prError}
+          startMode={startMode}
+          loading={loading}
+          onCreatePR={handleCreatePR}
+          onSaveStartMode={saveStartMode}
+          onShowEnvModal={() => setShowEnvModal(true)}
+          onRunLatest={runLatest}
+          onRunCommit={run}
+        />
 
         <h3>Transcript History</h3>
         <button
@@ -773,33 +706,11 @@ export default function Editor({ initialOwner, initialRepo, initialBranch, initi
           )}
         </button>
 
-        <h3>Cache ({cache.length}/10)</h3>
-        {cache.map(e => (
-          <div key={e.id} className="cache-card">
-            <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
-              <span className="cache-repo">{e.repo}</span>
-              <code className="cache-sha">{e.sha.slice(0, 7)}</code>
-              <a
-                href={`https://github.com/etdofreshai/${e.repo}/commit/${e.sha}`}
-                target="_blank"
-                rel="noopener noreferrer"
-                style={{ color: '#6b7280', fontSize: 10, textDecoration: 'none' }}
-                title="View on GitHub"
-              >↗</a>
-              {e.type !== 'static' && <span className="cache-port">:{e.port}</span>}
-              {e.type === 'static' && <span style={{ color: '#6b7280', fontSize: 11 }}>static</span>}
-              {e.isLatest && <span className="cache-badge">latest · {e.branch}</span>}
-            </div>
-            <div>
-              <button className="btn-icon" onClick={() => showEntry(e)}>👁</button>
-              <button className="btn-icon danger" onClick={() => remove(e.id)}>✕</button>
-            </div>
-          </div>
-        ))}
+        <CachePanel cache={cache} onShowEntry={showEntry} onRemoveEntry={remove} />
       </div>
 
       <div className="preview-area">
-        <div className="preview-body" style={{ position: 'relative' }}>
+        <div className="preview-body">
           {loading && (
             <div className="loading-overlay">
               <span className="spinner spinner-large" />
@@ -812,87 +723,21 @@ export default function Editor({ initialOwner, initialRepo, initialBranch, initi
             <IframeWithRetry ref={iframeRef} key={`${activeEntryId}-${previewPort}`} port={previewPort} cacheId={activeEntryId || undefined} />
           ) : null}
           {previewPort && (
-            <div className="preview-fallback" style={{ display: 'none', alignItems: 'center', justifyContent: 'center', height: '100%', color: '#6c7086', fontSize: 14, flexDirection: 'column', gap: 8, position: 'absolute', inset: 0 }}>
-              <span style={{ fontSize: 28 }}>⚠️</span>
+            <div className="preview-fallback">
+              <span className="preview-fallback-icon">⚠️</span>
               <span>Server not available — try running the entry again</span>
             </div>
           )}
           {!previewPort && activeEntry?.type === 'static' ? (
-            <div style={{ display: 'flex', height: '100%' }}>
-              <div style={{ width: 260, borderRight: '1px solid #2a2a3e', overflow: 'auto', fontSize: 13, flexShrink: 0, background: '#1a1a2e' }}>
-                {(() => {
-                  const renderItems = (parentPath: string, depth: number): React.ReactNode[] => {
-                    const items = files
-                      .filter(p => {
-                        if (!parentPath) return !p.replace(/\/$/, '').includes('/');
-                        return p.startsWith(parentPath) && p !== parentPath &&
-                          !p.slice(parentPath.length).replace(/\/$/, '').includes('/');
-                      })
-                      .sort((a, b) => {
-                        const aD = a.endsWith('/'), bD = b.endsWith('/');
-                        if (aD !== bD) return aD ? -1 : 1;
-                        return a.localeCompare(b);
-                      });
-                    return items.map(item => {
-                      const isDir = item.endsWith('/');
-                      const expanded = expandedDirs.has(item);
-                      const name = item.replace(/\/$/, '').split('/').pop()!;
-                      const isSelected = currentFile?.path === item;
-                      return (
-                        <div key={item}>
-                          <div
-                            onClick={() => isDir
-                              ? setExpandedDirs(prev => { const n = new Set(prev); n.has(item) ? n.delete(item) : n.add(item); return n; })
-                              : viewFile(activeEntry!.id, item)
-                            }
-                            style={{
-                              padding: '3px 8px', paddingLeft: 8 + depth * 16, cursor: 'pointer',
-                              background: isSelected ? 'rgba(137, 180, 250, 0.15)' : 'transparent',
-                              color: isSelected ? '#89b4fa' : '#cdd6f4',
-                              whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
-                            }}
-                            onMouseEnter={e => { if (!isSelected) e.currentTarget.style.background = 'rgba(255,255,255,0.05)'; }}
-                            onMouseLeave={e => { if (!isSelected) e.currentTarget.style.background = 'transparent'; }}
-                          >
-                            <span style={{ marginRight: 4 }}>{isDir ? (expanded ? '📂' : '📁') : '📄'}</span>
-                            {name}
-                          </div>
-                          {isDir && expanded && renderItems(item, depth + 1)}
-                        </div>
-                      );
-                    });
-                  };
-                  return renderItems('', 0);
-                })()}
-              </div>
-              <div style={{ flex: 1, overflow: 'auto', display: 'flex', flexDirection: 'column', background: '#16161e' }}>
-                {currentFile ? (
-                  <>
-                    <div style={{ padding: '6px 12px', borderBottom: '1px solid #2a2a3e', fontSize: 12, color: '#8888aa', background: '#1a1a2e' }}>
-                      {currentFile.path.split('/').map((part, i, arr) => (
-                        <span key={i}>
-                          {i > 0 && <span style={{ margin: '0 2px', color: '#555' }}>/</span>}
-                          <span style={{ color: i === arr.length - 1 ? '#e0e0e0' : '#8888aa' }}>{part}</span>
-                        </span>
-                      ))}
-                    </div>
-                    {currentFile.binary ? (
-                      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', flex: 1, color: '#6b7280' }}>
-                        Binary file — cannot preview
-                      </div>
-                    ) : (
-                      <pre style={{ margin: 0, padding: 12, fontSize: 13, fontFamily: 'ui-monospace, monospace', overflow: 'auto', flex: 1, background: '#16161e', color: '#cdd6f4', lineHeight: 1.5 }}>
-                        {currentFile.content}
-                      </pre>
-                    )}
-                  </>
-                ) : (
-                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', flex: 1, color: '#6b7280' }}>
-                    Select a file to view
-                  </div>
-                )}
-              </div>
-            </div>
+            <StaticFileBrowser
+              cacheId={activeEntry.id}
+              files={files}
+              filesTruncated={filesTruncated}
+              currentFile={currentFile}
+              expandedDirs={expandedDirs}
+              onSetExpandedDirs={setExpandedDirs}
+              onViewFile={viewFile}
+            />
           ) : (
             <div className="preview-placeholder">
               Select a commit and click Run to preview
@@ -903,78 +748,24 @@ export default function Editor({ initialOwner, initialRepo, initialBranch, initi
       </div>{/* close main-content */}
 
       {showEnvModal && (
-        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.7)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000 }} onClick={() => setShowEnvModal(false)}>
-          <div style={{ background: '#1a1a2e', border: '1px solid #3a3a5e', borderRadius: 12, padding: 24, width: 600, maxWidth: '90vw', maxHeight: '80vh', overflow: 'auto' }} onClick={e => e.stopPropagation()}>
-            <h3 style={{ marginTop: 0, color: '#cdd6f4' }}>.env — {selectedRepo}</h3>
-            <p style={{ color: '#6b7280', fontSize: 12, margin: '0 0 12px' }}>One variable per line: <code style={{ color: '#89b4fa' }}>KEY=value</code>. Lines starting with <code style={{ color: '#6b7280' }}>#</code> are comments.</p>
-            <textarea
-              value={envText}
-              onChange={e => setEnvText(e.target.value)}
-              placeholder={"# Database\nDATABASE_URL=postgresql://...\n\n# Ports\nBACKEND_PORT=3001"}
-              spellCheck={false}
-              style={{
-                width: '100%', minHeight: 250, background: '#16161e', border: '1px solid #3a3a5e',
-                borderRadius: 8, color: '#cdd6f4', padding: '12px 14px', fontSize: 13,
-                fontFamily: '"JetBrains Mono", "Fira Code", "Cascadia Code", monospace',
-                lineHeight: 1.6, resize: 'vertical', outline: 'none', boxSizing: 'border-box',
-                tabSize: 2,
-              }}
-            />
-            <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end', marginTop: 12 }}>
-              <button
-                onClick={() => setShowEnvModal(false)}
-                style={{ background: 'transparent', color: '#6b7280', border: '1px solid #3a3a5e', borderRadius: 6, padding: '6px 16px', cursor: 'pointer', fontSize: 13 }}
-              >
-                Cancel
-              </button>
-              <button
-                onClick={() => { saveEnvText(envText); setShowEnvModal(false); }}
-                style={{ background: '#a6e3a1', color: '#1a1a2e', border: 'none', borderRadius: 6, padding: '6px 20px', cursor: 'pointer', fontSize: 13, fontWeight: 600 }}
-              >
-                Save
-              </button>
-            </div>
-          </div>
-        </div>
+        <EnvModal
+          selectedRepo={selectedRepo}
+          envText={envText}
+          onChangeEnvText={setEnvText}
+          onSave={() => { saveEnvText(envText); setShowEnvModal(false); }}
+          onClose={() => setShowEnvModal(false)}
+        />
       )}
 
       {showLogModal && (
-        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.7)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000 }} onClick={() => setShowLogModal(false)}>
-          <div style={{ background: '#1a1a2e', border: '1px solid #3a3a5e', borderRadius: 12, padding: 24, width: 700, maxWidth: '90vw', maxHeight: '80vh', display: 'flex', flexDirection: 'column' }} onClick={e => e.stopPropagation()}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
-              <h3 style={{ margin: 0, color: '#cdd6f4' }}>Server Log</h3>
-              <button
-                onClick={async () => {
-                  if (!activeEntry) return;
-                  try {
-                    const res = await api(`/api/cache/${activeEntry.id}/log`);
-                    setLogContent(res.log || '(no log output)');
-                  } catch { setLogContent('(failed to fetch log)'); }
-                }}
-                style={{ background: 'transparent', color: '#89b4fa', border: '1px solid #3a3a5e', borderRadius: 6, padding: '2px 10px', cursor: 'pointer', fontSize: 12 }}
-              >
-                ↻ Refresh
-              </button>
-            </div>
-            <pre style={{
-              flex: 1, overflow: 'auto', background: '#16161e', border: '1px solid #3a3a5e',
-              borderRadius: 8, padding: '12px 14px', fontSize: 12, color: '#cdd6f4',
-              fontFamily: '"JetBrains Mono", "Fira Code", monospace', lineHeight: 1.5,
-              margin: 0, whiteSpace: 'pre-wrap', wordBreak: 'break-all',
-            }}>
-              {logContent}
-            </pre>
-            <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 12 }}>
-              <button onClick={() => setShowLogModal(false)}
-                style={{ background: 'transparent', color: '#6b7280', border: '1px solid #3a3a5e', borderRadius: 6, padding: '6px 16px', cursor: 'pointer', fontSize: 13 }}>
-                Close
-              </button>
-            </div>
-          </div>
-        </div>
+        <LogModal
+          logContent={logContent}
+          onRefresh={refreshLog}
+          onClose={() => setShowLogModal(false)}
+        />
       )}
 
-      {showHeader && <VoiceButton context={activeEntry ? { owner: 'etdofreshai', repo: activeEntry.repo, branch: activeEntry.branch, sha: activeEntry.sha } : undefined} iframeRef={iframeRef} consoleLogs={consoleLogs} />}
+      {showHeader && <VoiceButton context={activeEntry ? { owner: activeEntry.owner, repo: activeEntry.repo, branch: activeEntry.branch, sha: activeEntry.sha } : undefined} iframeRef={iframeRef} consoleLogs={consoleLogs} />}
 
       {showTranscriptModal && (
         <TranscriptHistoryModal onClose={() => setShowTranscriptModal(false)} />

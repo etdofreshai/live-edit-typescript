@@ -4,39 +4,222 @@ import http from 'http';
 import httpProxy from 'http-proxy';
 import fs from 'fs';
 import pathModule from 'path';
+import { pathToFileURL } from 'url';
 import multer from 'multer';
 // Using native FormData + Blob (Node 22)
-import { listRepos, listBranches, listCommits, getBranchHead, getCommit, createBranch, getDefaultBranch, compareBranches, createPullRequest, OWNER } from './github.js';
-import { getEntry, addEntry, evictIfNeeded, allocatePort, removeEntry, listEntries, makeId, getEntryByPort, getLatestEntries, updateEntry, getEntryById } from './cache-manager.js';
-import { cloneAndStart, getTargetDir, pullLatest, getServerLog } from './runner.js';
+import { listRepos, listBranches, listCommits, getBranchHead, getCommit, createBranch, getDefaultBranch, compareBranches, createPullRequest, DEFAULT_OWNER } from './github.js';
+import { getEntry, addEntry, allocatePort, releasePort, removeEntry, listEntries, makeId, getEntryByPort, getLatestEntries, updateEntry, getEntryById } from './cache-manager.js';
+import { events as cacheEvents } from './cache-manager.js';
+import { cloneAndStart, pullLatest, getServerLog, stopServer } from './runner.js';
 import { webhookRouter, registerWebhook, unregisterWebhook } from './webhook.js';
+import { assertInsideTargets } from './path-safety.js';
+import { validateBranch, validateOwner, validateRepo, validateSha } from './validators.js';
+import { walkBounded } from './file-walk.js';
+import { createRequireAdmin } from './admin-middleware.js';
+import { log } from './logging.js';
+import type { CacheEntry } from './cache-manager.js';
 
-import { execSync } from 'child_process';
+import { execFileSync } from 'child_process';
 
 const app = express();
 app.use(cors());
 
+const packageInfo = JSON.parse(fs.readFileSync(pathModule.join(process.cwd(), 'package.json'), 'utf-8')) as { version?: string };
+const version = packageInfo.version || '0.0.0';
+let warnedDevWebhookUrl = false;
+const inflight = new Map<string, Promise<CacheEntry>>();
+const ADMIN_TOKEN = process.env.ADMIN_TOKEN;
+const requireAdmin = createRequireAdmin(ADMIN_TOKEN);
+const DEFAULT_SERVER_PORT = 3000;
+
+type ErrorLike = { message?: string };
+type WildcardParams = express.Request['params'] & { 0?: string };
+type SelfHandleRequest = http.IncomingMessage & {
+  __selfHandle?: boolean;
+  originalUrl?: string;
+};
+type VoiceContext = {
+  owner?: string;
+  repo?: string;
+  branch?: string;
+  sha?: string;
+};
+type GatewayInputContentPart =
+  | { type: 'input_text'; text: string }
+  | { type: 'input_image'; source: { type: 'base64'; media_type: string; data: string } };
+type GatewayInput = {
+  type: 'message';
+  role: 'user';
+  content: GatewayInputContentPart[];
+};
+type GatewayResponseContentPart = {
+  type?: string;
+  text?: string;
+};
+type GatewayResponseOutputItem = {
+  type?: string;
+  role?: string;
+  content?: GatewayResponseContentPart[];
+};
+type GatewayResponseBody = {
+  output?: GatewayResponseOutputItem[];
+  choices?: Array<{ message?: { content?: string } }>;
+};
+type MulterErrorLike = ErrorLike & {
+  name?: string;
+  code?: string;
+};
+
+function errorMessage(e: unknown): string {
+  return e instanceof Error ? e.message : String(e ?? '');
+}
+
+function isErrorLike(e: unknown): e is ErrorLike {
+  return typeof e === 'object' && e !== null && 'message' in e;
+}
+
+function parseJsonObject(value: string | undefined): unknown {
+  return value ? JSON.parse(value) : undefined;
+}
+
+export function getServerPort(env: NodeJS.ProcessEnv = process.env): number {
+  const rawPort = env.PORT;
+  if (rawPort === undefined || rawPort === '') return DEFAULT_SERVER_PORT;
+
+  const port = Number(rawPort);
+  if (!Number.isInteger(port) || port < 1 || port > 65535) {
+    throw new Error(`invalid PORT: expected an integer from 1 to 65535, got ${JSON.stringify(rawPort)}`);
+  }
+
+  return port;
+}
+
+function isVoiceContext(value: unknown): value is VoiceContext {
+  return typeof value === 'object' && value !== null;
+}
+
+function isStringArray(value: unknown): value is string[] {
+  return Array.isArray(value) && value.every(item => typeof item === 'string');
+}
+
+function toGatewayResponseBody(value: unknown): GatewayResponseBody | null {
+  return typeof value === 'object' && value !== null ? value as GatewayResponseBody : null;
+}
+
+function validationMessage(e: unknown): string {
+  const message = errorMessage(e);
+  if (message.startsWith('invalid repo:')) return 'invalid repo';
+  if (message.startsWith('invalid owner:')) return 'invalid owner';
+  if (message.startsWith('invalid sha:')) return 'invalid sha';
+  if (message.startsWith('invalid branch:')) return 'invalid branch';
+  if (message === 'path outside targets' || message === 'path outside entry') return 'invalid path';
+  return 'invalid input';
+}
+
+function markLegacyOwner(res: express.Response) {
+  res.setHeader('Deprecation', 'true');
+  res.setHeader('Warning', `299 - "owner-less repository API routes are deprecated; using ${DEFAULT_OWNER}"`);
+}
+
+function isInsideDir(absPath: string, dir: string): boolean {
+  const resolved = pathModule.resolve(absPath);
+  const root = pathModule.resolve(dir);
+  return resolved === root || resolved.startsWith(root + pathModule.sep);
+}
+
+function getWebhookCallbackUrl(): string | null {
+  if (process.env.WEBHOOK_URL) return process.env.WEBHOOK_URL;
+  if (process.env.NODE_ENV === 'production') return null;
+
+  if (!warnedDevWebhookUrl) {
+    log.warn('[webhook] WEBHOOK_URL is not configured; using localhost callback URL for development');
+    warnedDevWebhookUrl = true;
+  }
+
+  const port = getServerPort();
+  return `http://localhost:${port}/api/webhook`;
+}
+
+function isProcessAlive(pid: number | undefined): boolean {
+  if (!pid) return false;
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function requiresRestart(changedFiles: string[]): boolean {
+  const restartFiles = new Set(['package.json', 'package-lock.json', 'vite.config.ts', 'vite.config.js']);
+  return changedFiles.some(file => restartFiles.has(file));
+}
+
+async function refreshLatestEntry(entry: CacheEntry, headSha: string) {
+  const { changedFiles } = await pullLatest(entry, headSha);
+  const shouldRestart = requiresRestart(changedFiles) || !isProcessAlive(entry.pid);
+
+  if (!shouldRestart) {
+    updateEntry(entry.id, { sha: headSha });
+    return;
+  }
+
+  const oldId = entry.id;
+  const port = entry.port || await allocatePort();
+  if (!port) throw new Error('No ports available');
+
+  try {
+    await stopServer(entry);
+    const { dir, pid, type } = await cloneAndStart(entry.owner, entry.repo, headSha, port, {
+      branch: entry.branch,
+      isLatest: true,
+    });
+    if (type === 'static') await releasePort(port);
+    await removeEntry(oldId);
+    await addEntry({
+      ...entry,
+      id: makeId(entry.owner, entry.repo, headSha),
+      sha: headSha,
+      port: type === 'static' ? 0 : port,
+      dir,
+      pid,
+      type,
+      lastAccessed: Date.now(),
+    });
+  } catch (e) {
+    if (!entry.port) await releasePort(port);
+    throw e;
+  }
+}
+
 // Git info for footer
 const gitInfo = (() => {
   try {
-    const sha = execSync('git rev-parse HEAD', { encoding: 'utf8' }).trim();
-    const branch = execSync('git rev-parse --abbrev-ref HEAD', { encoding: 'utf8' }).trim();
-    const date = execSync('git log -1 --format=%aI', { encoding: 'utf8' }).trim();
-    return { owner: OWNER, repo: 'live-edit-typescript', branch, sha, date };
+    const sha = execFileSync('git', ['rev-parse', 'HEAD'], { encoding: 'utf8' }).trim();
+    const branch = execFileSync('git', ['rev-parse', '--abbrev-ref', 'HEAD'], { encoding: 'utf8' }).trim();
+    const date = execFileSync('git', ['log', '-1', '--format=%aI'], { encoding: 'utf8' }).trim();
+    return { owner: DEFAULT_OWNER, repo: 'live-edit-typescript', branch, sha, date };
   } catch { return null; }
 })();
 app.get('/api/info', (_req, res) => res.json(gitInfo));
 // Webhook route MUST come before express.json() — it needs raw body
 app.use(webhookRouter);
-app.use(express.json());
+app.use(express.json({ limit: '1mb' }));
+
+app.get('/api/health', (_req, res) => {
+  res.json({ ok: true, version, uptime: Math.round(process.uptime()) });
+});
 
 // Multer configuration for voice uploads (audio + optional screenshot)
-const upload = multer({ storage: multer.memoryStorage() });
+const upload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 10 * 1024 * 1024, files: 4, fields: 20 },
+});
 
 // Single reusable proxy instance
 const proxy = httpProxy.createProxyServer({ ws: true, changeOrigin: true });
 proxy.on('error', (err, _req, res) => {
-  console.error('Proxy error:', err.message);
+  log.error('Proxy error:', err.message);
   if (res && 'writeHead' in res) {
     (res as http.ServerResponse).writeHead(502, { 'Content-Type': 'text/plain' });
     (res as http.ServerResponse).end('Proxy error');
@@ -47,61 +230,167 @@ app.get('/api/repos', async (_req, res) => {
   try {
     const repos = await listRepos();
     res.json(repos);
-  } catch (e: any) {
-    res.status(500).json({ error: e.message });
+  } catch (e: unknown) {
+    if (errorMessage(e).startsWith('invalid ')) return res.status(400).json({ error: validationMessage(e) });
+    res.status(500).json({ error: errorMessage(e) });
+  }
+});
+
+app.get('/api/repos/:owner', async (req, res) => {
+  try {
+    const owner = validateOwner(req.params.owner);
+    res.json(await listRepos(owner));
+  } catch (e: unknown) {
+    if (errorMessage(e).startsWith('invalid ')) return res.status(400).json({ error: validationMessage(e) });
+    res.status(500).json({ error: errorMessage(e) });
+  }
+});
+
+app.get('/api/repos/:owner/:repo/branches', async (req, res) => {
+  try {
+    const owner = validateOwner(req.params.owner);
+    const repo = validateRepo(req.params.repo);
+    res.json(await listBranches(owner, repo));
+  } catch (e: unknown) {
+    if (errorMessage(e).startsWith('invalid ')) return res.status(400).json({ error: validationMessage(e) });
+    res.status(500).json({ error: errorMessage(e) });
   }
 });
 
 app.get('/api/repos/:repo/branches', async (req, res) => {
   try {
-    res.json(await listBranches(req.params.repo));
-  } catch (e: any) {
-    res.status(500).json({ error: e.message });
+    markLegacyOwner(res);
+    const repo = validateRepo(req.params.repo);
+    res.json(await listBranches(DEFAULT_OWNER, repo));
+  } catch (e: unknown) {
+    if (errorMessage(e).startsWith('invalid ')) return res.status(400).json({ error: validationMessage(e) });
+    res.status(500).json({ error: errorMessage(e) });
   }
 });
 
-app.post('/api/repos/:repo/branches', async (req, res) => {
+app.post('/api/repos/:owner/:repo/branches', requireAdmin, async (req, res) => {
   const { name, from } = req.body;
   if (!name || !from) return res.status(400).json({ error: 'name and from required' });
   try {
-    const sha = await getBranchHead(req.params.repo, from);
-    const ref = await createBranch(req.params.repo, name, sha);
+    const owner = validateOwner(req.params.owner);
+    const repo = validateRepo(req.params.repo);
+    const branchName = validateBranch(name);
+    const fromBranch = validateBranch(from);
+    const sha = await getBranchHead(owner, repo, fromBranch);
+    const ref = await createBranch(owner, repo, branchName, sha);
     res.json({ name, sha, ref: ref.ref });
-  } catch (e: any) {
-    const status = e.message.includes('already exists') ? 409 : 500;
-    res.status(status).json({ error: e.message });
+  } catch (e: unknown) {
+    if (errorMessage(e).startsWith('invalid ')) return res.status(400).json({ error: validationMessage(e) });
+    const status = errorMessage(e).includes('already exists') ? 409 : 500;
+    res.status(status).json({ error: errorMessage(e) });
+  }
+});
+
+app.post('/api/repos/:repo/branches', requireAdmin, async (req, res) => {
+  const { name, from } = req.body;
+  if (!name || !from) return res.status(400).json({ error: 'name and from required' });
+  try {
+    markLegacyOwner(res);
+    const repo = validateRepo(req.params.repo);
+    const branchName = validateBranch(name);
+    const fromBranch = validateBranch(from);
+    const sha = await getBranchHead(DEFAULT_OWNER, repo, fromBranch);
+    const ref = await createBranch(DEFAULT_OWNER, repo, branchName, sha);
+    res.json({ name, sha, ref: ref.ref });
+  } catch (e: unknown) {
+    if (errorMessage(e).startsWith('invalid ')) return res.status(400).json({ error: validationMessage(e) });
+    const status = errorMessage(e).includes('already exists') ? 409 : 500;
+    res.status(status).json({ error: errorMessage(e) });
+  }
+});
+
+app.get('/api/repos/:owner/:repo/branches/:branch/compare', async (req, res) => {
+  try {
+    const owner = validateOwner(req.params.owner);
+    const repo = validateRepo(req.params.repo);
+    const branch = validateBranch(req.params.branch);
+    const defaultBranch = await getDefaultBranch(owner, repo);
+    if (branch === defaultBranch) {
+      return res.json({ ahead: 0, behind: 0, defaultBranch });
+    }
+    const cmp = await compareBranches(owner, repo, defaultBranch, branch);
+    res.json({ ahead: cmp.ahead_by, behind: cmp.behind_by, defaultBranch });
+  } catch (e: unknown) {
+    if (errorMessage(e).startsWith('invalid ')) return res.status(400).json({ error: validationMessage(e) });
+    res.status(500).json({ error: errorMessage(e) });
   }
 });
 
 app.get('/api/repos/:repo/branches/:branch/compare', async (req, res) => {
   try {
-    const defaultBranch = await getDefaultBranch(req.params.repo);
-    if (req.params.branch === defaultBranch) {
+    markLegacyOwner(res);
+    const repo = validateRepo(req.params.repo);
+    const branch = validateBranch(req.params.branch);
+    const defaultBranch = await getDefaultBranch(DEFAULT_OWNER, repo);
+    if (branch === defaultBranch) {
       return res.json({ ahead: 0, behind: 0, defaultBranch });
     }
-    const cmp = await compareBranches(req.params.repo, defaultBranch, req.params.branch);
+    const cmp = await compareBranches(DEFAULT_OWNER, repo, defaultBranch, branch);
     res.json({ ahead: cmp.ahead_by, behind: cmp.behind_by, defaultBranch });
-  } catch (e: any) {
-    res.status(500).json({ error: e.message });
+  } catch (e: unknown) {
+    if (errorMessage(e).startsWith('invalid ')) return res.status(400).json({ error: validationMessage(e) });
+    res.status(500).json({ error: errorMessage(e) });
   }
 });
 
-app.post('/api/repos/:repo/pulls', async (req, res) => {
+app.post('/api/repos/:owner/:repo/pulls', requireAdmin, async (req, res) => {
   const { head, base, title, body } = req.body;
   if (!head || !base || !title) return res.status(400).json({ error: 'head, base, and title required' });
   try {
-    const pr = await createPullRequest(req.params.repo, title, head, base, body);
+    const owner = validateOwner(req.params.owner);
+    const repo = validateRepo(req.params.repo);
+    const headBranch = validateBranch(head);
+    const baseBranch = validateBranch(base);
+    const pr = await createPullRequest(owner, repo, title, headBranch, baseBranch, body);
     res.json({ url: pr.html_url, number: pr.number });
-  } catch (e: any) {
-    res.status(500).json({ error: e.message });
+  } catch (e: unknown) {
+    if (errorMessage(e).startsWith('invalid ')) return res.status(400).json({ error: validationMessage(e) });
+    res.status(500).json({ error: errorMessage(e) });
+  }
+});
+
+app.post('/api/repos/:repo/pulls', requireAdmin, async (req, res) => {
+  const { head, base, title, body } = req.body;
+  if (!head || !base || !title) return res.status(400).json({ error: 'head, base, and title required' });
+  try {
+    markLegacyOwner(res);
+    const repo = validateRepo(req.params.repo);
+    const headBranch = validateBranch(head);
+    const baseBranch = validateBranch(base);
+    const pr = await createPullRequest(DEFAULT_OWNER, repo, title, headBranch, baseBranch, body);
+    res.json({ url: pr.html_url, number: pr.number });
+  } catch (e: unknown) {
+    if (errorMessage(e).startsWith('invalid ')) return res.status(400).json({ error: validationMessage(e) });
+    res.status(500).json({ error: errorMessage(e) });
+  }
+});
+
+app.get('/api/repos/:owner/:repo/branches/:branch/commits', async (req, res) => {
+  try {
+    const owner = validateOwner(req.params.owner);
+    const repo = validateRepo(req.params.repo);
+    const branch = validateBranch(req.params.branch);
+    res.json(await listCommits(owner, repo, branch));
+  } catch (e: unknown) {
+    if (errorMessage(e).startsWith('invalid ')) return res.status(400).json({ error: validationMessage(e) });
+    res.status(500).json({ error: errorMessage(e) });
   }
 });
 
 app.get('/api/repos/:repo/branches/:branch/commits', async (req, res) => {
   try {
-    res.json(await listCommits(req.params.repo, req.params.branch));
-  } catch (e: any) {
-    res.status(500).json({ error: e.message });
+    markLegacyOwner(res);
+    const repo = validateRepo(req.params.repo);
+    const branch = validateBranch(req.params.branch);
+    res.json(await listCommits(DEFAULT_OWNER, repo, branch));
+  } catch (e: unknown) {
+    if (errorMessage(e).startsWith('invalid ')) return res.status(400).json({ error: validationMessage(e) });
+    res.status(500).json({ error: errorMessage(e) });
   }
 });
 
@@ -109,150 +398,239 @@ app.get('/api/cache', (_req, res) => {
   res.json(listEntries());
 });
 
-app.post('/api/run', async (req, res) => {
-  const { repo, sha, envVars, startMode } = req.body;
-  if (!repo || !sha) return res.status(400).json({ error: 'repo and sha required' });
+app.get('/api/cache/stream', (req, res) => {
+  res.writeHead(200, {
+    'Content-Type': 'text/event-stream',
+    'Cache-Control': 'no-cache',
+    Connection: 'keep-alive',
+  });
 
-  const existing = getEntry(repo, sha);
-  if (existing) return res.json(existing);
+  const sendSnapshot = () => res.write(`data: ${JSON.stringify(listEntries())}\n\n`);
+  sendSnapshot();
 
-  await evictIfNeeded();
+  const onChange = () => sendSnapshot();
+  cacheEvents.on('change', onChange);
 
-  const port = allocatePort();
-  if (!port) return res.status(503).json({ error: 'No ports available' });
+  const heartbeat = setInterval(() => res.write(': ping\n\n'), 25_000);
 
+  req.on('close', () => {
+    cacheEvents.off('change', onChange);
+    clearInterval(heartbeat);
+  });
+});
+
+app.post('/api/run', requireAdmin, async (req, res) => {
+  const { envVars, startMode } = req.body;
+  let owner: string;
+  let repo: string;
+  let sha: string;
+  if (!req.body.owner || !req.body.repo || !req.body.sha) return res.status(400).json({ error: 'owner, repo, and sha required' });
   try {
-    const [{ dir, pid, type }, commitInfo] = await Promise.all([
-      cloneAndStart(repo, sha, port, { envVars, startMode }),
-      getCommit(repo, sha).catch(() => ({ message: '', date: '' })),
-    ]);
-    const entry = {
-      id: makeId(repo, sha),
-      repo,
-      sha,
-      port: type === 'static' ? 0 : port,
-      dir,
-      lastAccessed: Date.now(),
-      pid,
-      type,
-      commitMessage: commitInfo.message,
-      commitDate: commitInfo.date,
-    };
-    addEntry(entry);
-    res.json(entry);
-  } catch (e: any) {
-    res.status(500).json({ error: e.message });
+    owner = validateOwner(req.body.owner);
+    repo = validateRepo(req.body.repo);
+    sha = validateSha(req.body.sha);
+  } catch (e) {
+    return res.status(400).json({ error: validationMessage(e) });
+  }
+
+  const inflightKey = `${owner}:${repo}:${sha}`;
+  const pending = inflight.get(inflightKey);
+  if (pending) {
+    try {
+      return res.json(await pending);
+    } catch (e: unknown) {
+      if (errorMessage(e).startsWith('invalid ')) return res.status(400).json({ error: validationMessage(e) });
+      return res.status(500).json({ error: errorMessage(e) });
+    }
+  }
+
+  const promise = (async (): Promise<CacheEntry> => {
+    const existing = getEntry(owner, repo, sha);
+    if (existing) return existing;
+
+    const port = await allocatePort();
+    if (!port) throw new Error('No ports available');
+
+    try {
+      const [{ dir, pid, type }, commitInfo] = await Promise.all([
+        cloneAndStart(owner, repo, sha, port, { envVars, startMode }),
+        getCommit(owner, repo, sha).catch(() => ({ message: '', date: '' })),
+      ]);
+      const entry: CacheEntry = {
+        id: makeId(owner, repo, sha),
+        owner,
+        repo,
+        sha,
+        port: type === 'static' ? 0 : port,
+        dir,
+        lastAccessed: Date.now(),
+        pid,
+        type,
+        commitMessage: commitInfo.message,
+        commitDate: commitInfo.date,
+      };
+      if (type === 'static') await releasePort(port);
+      await addEntry(entry);
+      return entry;
+    } catch (e) {
+      await releasePort(port);
+      throw e;
+    }
+  })();
+  inflight.set(inflightKey, promise);
+  try {
+    res.json(await promise);
+  } catch (e: unknown) {
+    if (errorMessage(e).startsWith('invalid ')) return res.status(400).json({ error: validationMessage(e) });
+    const status = errorMessage(e) === 'No ports available' ? 503 : 500;
+    res.status(status).json({ error: errorMessage(e) });
+  } finally {
+    inflight.delete(inflightKey);
   }
 });
 
-app.post('/api/run-latest', async (req, res) => {
-  const { repo, branch, envVars, startMode } = req.body;
-  if (!repo || !branch) return res.status(400).json({ error: 'repo and branch required' });
-
+app.post('/api/run-latest', requireAdmin, async (req, res) => {
+  const { envVars, startMode } = req.body;
+  let owner: string;
+  let repo: string;
+  let branch: string;
+  if (!req.body.owner || !req.body.repo || !req.body.branch) return res.status(400).json({ error: 'owner, repo, and branch required' });
   try {
-    const sha = await getBranchHead(repo, branch);
+    owner = validateOwner(req.body.owner);
+    repo = validateRepo(req.body.repo);
+    branch = validateBranch(req.body.branch);
+  } catch (e) {
+    return res.status(400).json({ error: validationMessage(e) });
+  }
+
+  const webhookUrl = getWebhookCallbackUrl();
+  if (!webhookUrl) return res.status(500).json({ error: 'webhook URL not configured' });
+
+  const inflightKey = `${owner}:${repo}:${branch}`;
+  const pending = inflight.get(inflightKey);
+  if (pending) {
+    try {
+      return res.json(await pending);
+    } catch (e: unknown) {
+      if (errorMessage(e).startsWith('invalid ')) return res.status(400).json({ error: validationMessage(e) });
+      return res.status(500).json({ error: errorMessage(e) });
+    }
+  }
+
+  const promise = (async (): Promise<CacheEntry> => {
+    const sha = await getBranchHead(owner, repo, branch);
 
     // Check if we already have a latest entry for this repo+branch
-    const existing = getLatestEntries().find(e => e.repo === repo && e.branch === branch);
+    const existing = getLatestEntries().find(e => e.owner === owner && e.repo === repo && e.branch === branch);
     if (existing) {
       existing.lastAccessed = Date.now();
-      return res.json(existing);
+      return existing;
     }
 
-    await evictIfNeeded();
-    const port = allocatePort();
-    if (!port) return res.status(503).json({ error: 'No ports available' });
+    const port = await allocatePort();
+    if (!port) throw new Error('No ports available');
 
-    const [{ dir, pid, type }, commitInfo] = await Promise.all([
-      cloneAndStart(repo, sha, port, { branch, isLatest: true, envVars, startMode }),
-      getCommit(repo, sha).catch(() => ({ message: '', date: '' })),
-    ]);
-    const entry = {
-      id: makeId(repo, sha),
-      repo, sha, port, dir, pid,
-      lastAccessed: Date.now(),
-      branch,
-      isLatest: true,
-      type,
-      commitMessage: commitInfo.message,
-      commitDate: commitInfo.date,
-    };
-    addEntry(entry);
+    let entry: CacheEntry;
+    try {
+      const [{ dir, pid, type }, commitInfo] = await Promise.all([
+        cloneAndStart(owner, repo, sha, port, { branch, isLatest: true, envVars, startMode }),
+        getCommit(owner, repo, sha).catch(() => ({ message: '', date: '' })),
+      ]);
+      entry = {
+        id: makeId(owner, repo, sha),
+        owner,
+        repo, sha, port: type === 'static' ? 0 : port, dir, pid,
+        lastAccessed: Date.now(),
+        branch,
+        isLatest: true,
+        type,
+        commitMessage: commitInfo.message,
+        commitDate: commitInfo.date,
+      };
+      if (type === 'static') await releasePort(port);
+      await addEntry(entry);
+    } catch (e) {
+      await releasePort(port);
+      throw e;
+    }
 
     // Auto-register webhook for this repo
-    registerWebhook(repo, req.get('host'));
+    registerWebhook(owner, repo, webhookUrl);
 
-    res.json(entry);
-  } catch (e: any) {
-    res.status(500).json({ error: e.message });
+    return entry;
+  })();
+  inflight.set(inflightKey, promise);
+  try {
+    res.json(await promise);
+  } catch (e: unknown) {
+    if (errorMessage(e).startsWith('invalid ')) return res.status(400).json({ error: validationMessage(e) });
+    const status = errorMessage(e) === 'No ports available' ? 503 : 500;
+    res.status(status).json({ error: errorMessage(e) });
+  } finally {
+    inflight.delete(inflightKey);
   }
 });
 
-app.get('/api/cache/:id/log', (req, res) => {
+app.get('/api/cache/:id/log', requireAdmin, (req, res) => {
   const entry = getEntryById(req.params.id);
   if (!entry) return res.status(404).json({ error: 'Entry not found' });
   const log = getServerLog(entry.dir);
   res.json({ log });
 });
 
-app.delete('/api/cache/:id', async (req, res) => {
+app.delete('/api/cache/:id', requireAdmin, async (req, res) => {
   const entry = getEntryById(req.params.id);
   const ok = await removeEntry(req.params.id);
   // Clean up webhook if this was a latest entry
   if (ok && entry?.isLatest && entry.repo) {
-    unregisterWebhook(entry.repo).catch(() => {});
+    unregisterWebhook(entry.owner, entry.repo).catch(() => {});
   }
   res.json({ ok });
 });
 
 // File explorer endpoints for static repos
-app.get('/api/cache/:id/files', (req, res) => {
+app.get('/api/cache/:id/files', requireAdmin, async (req, res) => {
   const entry = getEntryById(req.params.id);
   if (!entry) return res.status(404).json({ error: 'Not found' });
-
-  const files: string[] = [];
-  const walk = (dir: string, prefix: string) => {
-    for (const item of fs.readdirSync(dir, { withFileTypes: true })) {
-      if (item.name === '.git' || item.name === 'node_modules') continue;
-      const rel = prefix ? `${prefix}/${item.name}` : item.name;
-      if (item.isDirectory()) {
-        files.push(rel + '/');
-        walk(pathModule.join(dir, item.name), rel);
-      } else {
-        files.push(rel);
-      }
-    }
-  };
   try {
-    walk(entry.dir, '');
-    files.sort();
-    res.json(files);
-  } catch (e: any) {
-    res.status(500).json({ error: e.message });
+    assertInsideTargets(entry.dir);
+  } catch (e) {
+    return res.status(400).json({ error: validationMessage(e) });
+  }
+
+  try {
+    const result = await walkBounded(entry.dir);
+    res.json(result);
+  } catch (e: unknown) {
+    res.status(500).json({ error: errorMessage(e) });
   }
 });
 
-app.get('/api/cache/:id/files/*', (req, res) => {
+app.get('/api/cache/:id/files/*', requireAdmin, async (req, res) => {
   const entry = getEntryById(req.params.id);
   if (!entry) return res.status(404).json({ error: 'Not found' });
 
-  const filePath = (req.params as any)[0] as string;
-  const fullPath = pathModule.join(entry.dir, filePath);
-
-  // Prevent path traversal
-  if (!fullPath.startsWith(entry.dir)) return res.status(403).json({ error: 'Forbidden' });
+  const filePath = (req.params as WildcardParams)[0] ?? '';
+  if (pathModule.isAbsolute(filePath)) return res.status(403).json({ error: 'Forbidden' });
+  const fullPath = pathModule.resolve(entry.dir, filePath);
 
   try {
-    const stat = fs.statSync(fullPath);
+    assertInsideTargets(fullPath);
+    if (!isInsideDir(fullPath, entry.dir)) throw new Error('path outside entry');
+    const stat = await fs.promises.stat(fullPath);
     if (stat.size > 500_000) return res.json({ binary: true, path: filePath });
 
-    const buf = fs.readFileSync(fullPath);
+    const buf = await fs.promises.readFile(fullPath);
     // Check if binary by looking for null bytes in first 8KB
     const sample = buf.subarray(0, 8192);
     if (sample.includes(0)) return res.json({ binary: true, path: filePath });
 
     res.json({ content: buf.toString('utf-8'), path: filePath });
-  } catch (e: any) {
+  } catch (e: unknown) {
+    const message = errorMessage(e);
+    if (message === 'path outside targets' || message === 'path outside entry') {
+      return res.status(403).json({ error: 'Forbidden' });
+    }
     res.status(404).json({ error: 'File not found' });
   }
 });
@@ -287,7 +665,7 @@ function addToHistory(entry: TranscriptEntry) {
   while (transcriptHistory.length > 100) transcriptHistory.shift();
 }
 
-app.get('/api/transcript-history', (_req, res) => {
+app.get('/api/transcript-history', requireAdmin, (_req, res) => {
   res.json(transcriptHistory.slice(-50));
 });
 
@@ -302,29 +680,49 @@ setInterval(() => {
 }, 5000);
 
 // GET /api/voice/jobs — poll current job states
-app.get('/api/voice/jobs', (_req, res) => {
+app.get('/api/voice/jobs', requireAdmin, (_req, res) => {
   res.json(Array.from(voiceJobs.values()));
 });
 
 // DELETE /api/voice/jobs/:id — dismiss a job
-app.delete('/api/voice/jobs/:id', (req, res) => {
+app.delete('/api/voice/jobs/:id', requireAdmin, (req, res) => {
   voiceJobs.delete(req.params.id);
   res.json({ ok: true });
 });
 
 // POST /api/voice — upload audio + optional screenshot, creates a job, processes async
-app.post('/api/voice', upload.fields([{ name: 'audio', maxCount: 1 }, { name: 'screenshot', maxCount: 1 }]), (req, res) => {
+app.post('/api/voice', requireAdmin, upload.fields([{ name: 'audio', maxCount: 1 }, { name: 'screenshot', maxCount: 1 }]), (req, res) => {
   const files = req.files as { [fieldname: string]: Express.Multer.File[] };
   if (!files?.audio?.[0]) return res.status(400).json({ error: 'No audio file provided' });
 
   const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
   if (!OPENAI_API_KEY) return res.status(500).json({ error: 'OPENAI_API_KEY not configured' });
 
-  const context = req.body.context ? JSON.parse(req.body.context) : undefined;
-  const consoleLogs = req.body.consoleLogs ? JSON.parse(req.body.consoleLogs) : undefined;
+  let context: VoiceContext | undefined;
+  let consoleLogs: string[] | undefined;
+  try {
+    try {
+      const parsedContext = parseJsonObject(req.body.context);
+      if (parsedContext !== undefined && !isVoiceContext(parsedContext)) return res.status(400).json({ error: 'invalid context' });
+      context = parsedContext;
+    }
+    catch { return res.status(400).json({ error: 'invalid context' }); }
+    try {
+      const parsedConsoleLogs = parseJsonObject(req.body.consoleLogs);
+      if (parsedConsoleLogs !== undefined && !isStringArray(parsedConsoleLogs)) return res.status(400).json({ error: 'invalid consoleLogs' });
+      consoleLogs = parsedConsoleLogs;
+    }
+    catch { return res.status(400).json({ error: 'invalid consoleLogs' }); }
+    if (context?.repo) validateRepo(context.repo);
+    if (context?.owner) validateOwner(context.owner);
+    if (context?.branch) validateBranch(context.branch);
+    if (context?.sha) validateSha(context.sha);
+  } catch (e) {
+    return res.status(400).json({ error: validationMessage(e) });
+  }
   const audioFile = files.audio[0];
   const screenshotFile = files.screenshot?.[0];
-  console.log(`[voice] Received: audio=${audioFile.size}b, screenshot=${screenshotFile ? screenshotFile.size + 'b' : 'none'}, consoleLogs=${consoleLogs ? consoleLogs.length : 0}`);
+  log.info(`[voice] Received: audio=${audioFile.size}b, screenshot=${screenshotFile ? screenshotFile.size + 'b' : 'none'}, consoleLogs=${consoleLogs ? consoleLogs.length : 0}`);
   
   const jobId = `voice-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
   const job: VoiceJob = { id: jobId, status: 'transcribing', text: '', startedAt: Date.now() };
@@ -350,13 +748,13 @@ app.post('/api/voice', upload.fields([{ name: 'audio', maxCount: 1 }, { name: 's
 
       if (!whisperRes.ok) {
         const err = await whisperRes.text();
-        console.error('Whisper API error:', err);
+        log.error('Whisper API error:', err);
         job.status = 'error'; job.error = 'Transcription failed';
         return;
       }
 
       const { text } = await whisperRes.json() as { text: string };
-      console.log('[voice] Transcribed:', text);
+      log.info('[voice] Transcribed:', text);
 
       if (!text?.trim()) {
         job.status = 'error'; job.text = '(no speech detected)';
@@ -396,7 +794,7 @@ app.post('/api/voice', upload.fields([{ name: 'audio', maxCount: 1 }, { name: 's
       }
 
       // Build input for OpenResponses API
-      const contentParts: any[] = [
+      const contentParts: GatewayInputContentPart[] = [
         { type: 'input_text', text: messageText }
       ];
       
@@ -407,14 +805,14 @@ app.post('/api/voice', upload.fields([{ name: 'audio', maxCount: 1 }, { name: 's
           type: 'input_image',
           source: { type: 'base64', media_type: 'image/png', data: base64 }
         });
-        console.log(`[voice] Screenshot attached (${Math.round(base64.length / 1024)}KB base64)`);
+        log.info(`[voice] Screenshot attached (${Math.round(base64.length / 1024)}KB base64)`);
       }
       
-      const input = [
+      const input: GatewayInput[] = [
         { type: 'message', role: 'user', content: contentParts }
       ];
 
-      console.log(`[voice] Sending to gateway via /v1/responses (${input.length} input items)`);
+      log.info(`[voice] Sending to gateway via /v1/responses (${input.length} input items)`);
       const gatewayRes = await fetch(`${OPENCLAW_GATEWAY_URL}/v1/responses`, {
         method: 'POST',
         headers: {
@@ -428,11 +826,11 @@ app.post('/api/voice', upload.fields([{ name: 'audio', maxCount: 1 }, { name: 's
       });
 
       // Parse response body (for transcript history) before checking status
-      let responseBody: any = null;
-      try { responseBody = await gatewayRes.json(); } catch {}
+      let responseBody: GatewayResponseBody | null = null;
+      try { responseBody = toGatewayResponseBody(await gatewayRes.json()); } catch {}
 
       if (!gatewayRes.ok) {
-        console.error('OpenClaw gateway error:', responseBody);
+        log.error('OpenClaw gateway error:', responseBody);
         job.status = 'error'; job.error = 'Gateway send failed';
         // Mark transcript as error
         const histEntry = transcriptHistory.find(e => e.id === transcriptId);
@@ -443,11 +841,11 @@ app.post('/api/voice', upload.fields([{ name: 'audio', maxCount: 1 }, { name: 's
       // Extract assistant response text from OpenAI Responses API format
       let responseText: string | undefined;
       try {
-        const outputItems: any[] = responseBody?.output || [];
+        const outputItems = responseBody?.output || [];
         for (const item of outputItems) {
           if (item?.type === 'message' && item?.role === 'assistant') {
-            const contentParts: any[] = Array.isArray(item.content) ? item.content : [];
-            const textPart = contentParts.find((c: any) => c.type === 'output_text' || c.type === 'text');
+            const contentParts = Array.isArray(item.content) ? item.content : [];
+            const textPart = contentParts.find(c => c.type === 'output_text' || c.type === 'text');
             if (textPart?.text) { responseText = textPart.text; break; }
           }
         }
@@ -464,11 +862,11 @@ app.post('/api/voice', upload.fields([{ name: 'audio', maxCount: 1 }, { name: 's
         if (responseText) histEntry.response = responseText;
       }
 
-      console.log('[voice] Sent to OpenClaw:', text.slice(0, 50));
+      log.info('[voice] Sent to OpenClaw:', text.slice(0, 50));
       job.status = 'sent';
-    } catch (e: any) {
-      console.error('[voice] Error:', e);
-      job.status = 'error'; job.error = e.message;
+    } catch (e: unknown) {
+      log.error('[voice] Error:', e);
+      job.status = 'error'; job.error = errorMessage(e);
       // Also mark transcript entry as error if it exists
       const histEntry = transcriptHistory.find(e => e.status === 'pending');
       if (histEntry) histEntry.status = 'error';
@@ -476,10 +874,22 @@ app.post('/api/voice', upload.fields([{ name: 'audio', maxCount: 1 }, { name: 's
   })();
 });
 
+// Multer error handler — catches file-too-large, too-many-files, etc.
+app.use((err: unknown, _req: express.Request, res: express.Response, next: express.NextFunction) => {
+  if (isErrorLike(err) && (err as MulterErrorLike).name === 'MulterError') {
+    const multerError = err as MulterErrorLike;
+    const code = multerError.code;
+    if (code === 'LIMIT_FILE_SIZE' || code === 'LIMIT_UNEXPECTED_FILE') {
+      return res.status(413).json({ error: 'File too large' });
+    }
+    return res.status(400).json({ error: 'Upload error' });
+  }
+  next(err);
+});
+
 // SHA endpoint for live-reload polling
 app.get('/api/cache/:id/sha', (req, res) => {
-  const entries = listEntries();
-  const entry = entries.find((e: any) => e.id === req.params.id);
+  const entry = getEntryById(req.params.id);
   if (!entry) return res.status(404).json({ error: 'not found' });
   res.json({ sha: entry.sha });
 });
@@ -487,20 +897,21 @@ app.get('/api/cache/:id/sha', (req, res) => {
 // Inject live-reload script into proxied HTML responses
 proxy.on('proxyRes', (proxyRes, req, res) => {
   // For non-selfHandleResponse requests, this is just informational — skip
-  if (!(req as any).__selfHandle) return;
+  const proxyReq = req as SelfHandleRequest;
+  if (!proxyReq.__selfHandle) return;
 
   const ct = proxyRes.headers['content-type'] || '';
   const isHtml = ct.includes('text/html');
 
   // Extract port and find cache entry
-  const portMatch = (req as any).originalUrl?.match(/^\/proxy\/(\d+)/);
+  const portMatch = proxyReq.originalUrl?.match(/^\/proxy\/(\d+)/);
   const port = portMatch ? parseInt(portMatch[1]) : 0;
   const entry = port ? getEntryByPort(port) : null;
 
   if (!isHtml || !entry) {
     // Pass through non-HTML responses unchanged
     (res as http.ServerResponse).writeHead(proxyRes.statusCode || 200, proxyRes.headers);
-    proxyRes.pipe(res as any);
+    proxyRes.pipe(res);
     return;
   }
 
@@ -552,9 +963,11 @@ app.use('/proxy/:port', (req, res) => {
   }
   // Reconstruct the full URL with the /proxy/{port} prefix
   req.url = `/proxy/${port}${req.url || '/'}`;
-  (req as any).__selfHandle = true;
+  (req as SelfHandleRequest).__selfHandle = true;
   proxy.web(req, res, { target: `http://localhost:${port}`, selfHandleResponse: true });
 });
+
+app.use(express.static(pathModule.join(process.cwd(), 'dist')));
 
 // SPA fallback - serve index.html for all other routes (must be last)
 // This allows React Router to handle client-side routing
@@ -575,6 +988,7 @@ app.get('*', (req, res) => {
 });
 
 const server = http.createServer(app);
+let shuttingDown = false;
 
 // WebSocket upgrade for HMR — also keep prefix intact
 server.on('upgrade', (req, socket, head) => {
@@ -589,22 +1003,49 @@ server.on('upgrade', (req, socket, head) => {
   socket.destroy();
 });
 
-server.listen(3000, () => {
-  console.log('API server on :3000');
+const shutdown = (signal: NodeJS.Signals) => {
+  if (shuttingDown) return;
+  shuttingDown = true;
+  log.info(`[shutdown] ${signal} received; closing API server and target processes`);
 
-  // Poll latest entries every 10 seconds
-  setInterval(async () => {
-    for (const entry of getLatestEntries()) {
-      try {
-        const headSha = await getBranchHead(entry.repo, entry.branch!);
-        if (headSha !== entry.sha) {
-          console.log(`[latest] ${entry.repo}/${entry.branch}: ${entry.sha.slice(0, 7)} → ${headSha.slice(0, 7)}`);
-          await pullLatest(entry, headSha);
-          updateEntry(entry.id, { sha: headSha });
+  const forceExit = setTimeout(() => {
+    log.error('[shutdown] timed out; exiting');
+    process.exit(0);
+  }, 8000);
+  forceExit.unref();
+
+  const stopTargets = Promise.allSettled(listEntries().map(entry => stopServer(entry)));
+  server.close(async () => {
+    await stopTargets;
+    process.exit(0);
+  });
+};
+
+process.on('SIGTERM', shutdown);
+process.on('SIGINT', shutdown);
+
+export function startServer() {
+  const serverPort = getServerPort();
+  server.listen(serverPort, () => {
+    log.info(`API server on :${serverPort}`);
+
+    // Poll latest entries every 10 seconds
+    setInterval(async () => {
+      for (const entry of getLatestEntries()) {
+        try {
+          const headSha = await getBranchHead(entry.owner, entry.repo, entry.branch!);
+          if (headSha !== entry.sha) {
+            log.info(`[latest] ${entry.repo}/${entry.branch}: ${entry.sha.slice(0, 7)} → ${headSha.slice(0, 7)}`);
+            await refreshLatestEntry(entry, headSha);
+          }
+        } catch (e: unknown) {
+          log.error(`[latest] poll error for ${entry.repo}/${entry.branch}:`, errorMessage(e));
         }
-      } catch (e: any) {
-        console.error(`[latest] poll error for ${entry.repo}/${entry.branch}:`, e.message);
       }
-    }
-  }, 10_000);
-});
+    }, 10_000);
+  });
+}
+
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+  startServer();
+}

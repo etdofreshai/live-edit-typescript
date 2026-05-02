@@ -1,0 +1,11 @@
+node_modules
+targets
+dist
+.env
+.env.*
+!.env.example
+.git
+.afk-reports
+.worktrees
+*.log
+.DS_Store
