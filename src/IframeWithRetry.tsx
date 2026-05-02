@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useRef, forwardRef } from 'react';
+import React, { useEffect, useState, useRef, forwardRef, useCallback } from 'react';
 import { api } from './api';
 
 interface IframeWithRetryProps {
@@ -37,7 +37,6 @@ export const IframeWithRetry = forwardRef<HTMLIFrameElement, IframeWithRetryProp
           } catch {}
           if (!cancelledRef.current) {
             setRetryCount(i + 1);
-            // Fetch server log every 3 attempts
             if (cacheId && (i + 1) % 3 === 0) {
               try {
                 const data = await api<{ log?: string }>(`/api/cache/${cacheId}/log`);
@@ -49,7 +48,6 @@ export const IframeWithRetry = forwardRef<HTMLIFrameElement, IframeWithRetryProp
         }
         if (!cancelledRef.current) {
           setTimedOut(true);
-          // Fetch final log
           if (cacheId) {
             try {
               const data = await api<{ log?: string }>(`/api/cache/${cacheId}/log`);
@@ -62,36 +60,48 @@ export const IframeWithRetry = forwardRef<HTMLIFrameElement, IframeWithRetryProp
       return () => { cancelledRef.current = true; };
     }, [port, cacheId]);
 
+    const handleCancel = useCallback(() => {
+      setCancelled(true);
+      cancelledRef.current = true;
+    }, []);
+
+    const handleToggleLog = useCallback(async () => {
+      setShowLog(prev => {
+        if (!prev && cacheId) {
+          api<{ log?: string }>(`/api/cache/${cacheId}/log`)
+            .then(data => { if (data.log) setServerLog(data.log); })
+            .catch(() => {});
+        }
+        return !prev;
+      });
+    }, [cacheId]);
+
     if (!ready) {
       return (
-        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', height: '100%', color: '#6b7280', gap: 12, padding: 20, background: '#1e1e2e' }}>
+        <div className="iframe-retry-state" role="status" aria-live="polite">
           {cancelled ? (
             <div>Cancelled</div>
           ) : timedOut ? (
             <>
-              <div style={{ color: '#f38ba8', fontSize: 16 }}>⚠ Server failed to start</div>
+              <div className="iframe-retry-error-text" role="alert">Server failed to start</div>
               {serverLog && (
-                <pre style={{ maxWidth: '90%', maxHeight: 300, overflow: 'auto', background: '#16161e', color: '#cdd6f4', padding: 12, borderRadius: 6, fontSize: 12, fontFamily: 'monospace', whiteSpace: 'pre-wrap', textAlign: 'left', width: '100%' }}>
-                  {serverLog}
-                </pre>
+                <pre className="iframe-retry-log">{serverLog}</pre>
               )}
             </>
           ) : (
             <>
-              <div className="spinner" />
+              <div className="spinner spinner-large" aria-hidden="true" />
               <div>Waiting for server on port {port}… {retryCount > 0 ? `(attempt ${retryCount}/${maxRetries})` : ''}</div>
-              <div style={{ display: 'flex', gap: 8 }}>
-                <button onClick={() => { setCancelled(true); cancelledRef.current = true; }} style={{ padding: '4px 16px', background: 'transparent', border: '1px solid #555', borderRadius: 6, color: '#999', cursor: 'pointer', fontSize: 13 }}>Cancel</button>
+              <div className="iframe-retry-actions">
+                <button onClick={handleCancel} className="iframe-retry-btn" aria-label="Cancel waiting for server">Cancel</button>
                 {cacheId && (
-                  <button onClick={async () => { setShowLog(!showLog); if (!showLog && cacheId) { try { const d = await api<{ log?: string }>(`/api/cache/${cacheId}/log`); if (d.log) setServerLog(d.log); } catch {} } }} style={{ padding: '4px 16px', background: 'transparent', border: '1px solid #555', borderRadius: 6, color: '#999', cursor: 'pointer', fontSize: 13 }}>
+                  <button onClick={handleToggleLog} className="iframe-retry-btn" aria-label={showLog ? 'Hide server log' : 'Show server log'}>
                     {showLog ? 'Hide Log' : 'Show Log'}
                   </button>
                 )}
               </div>
               {showLog && serverLog && (
-                <pre style={{ maxWidth: '90%', maxHeight: 200, overflow: 'auto', background: '#16161e', color: '#cdd6f4', padding: 12, borderRadius: 6, fontSize: 12, fontFamily: 'monospace', whiteSpace: 'pre-wrap', textAlign: 'left', width: '100%' }}>
-                  {serverLog}
-                </pre>
+                <pre className="iframe-retry-log iframe-retry-log--compact">{serverLog}</pre>
               )}
             </>
           )}
@@ -103,7 +113,8 @@ export const IframeWithRetry = forwardRef<HTMLIFrameElement, IframeWithRetryProp
       <iframe
         ref={ref}
         src={`/proxy/${port}/`}
-        style={{ width: '100%', height: '100%', border: 'none', background: '#1a1a2e' }}
+        className="iframe-retry-frame"
+        title={`Preview on port ${port}`}
       />
     );
   }
