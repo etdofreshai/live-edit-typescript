@@ -249,6 +249,29 @@ body {
   height: 100%; color: var(--text-muted); font-size: 14px;
 }
 
+/* === Iframe Retry States === */
+.iframe-retry-state {
+  display: flex; flex-direction: column; align-items: center;
+  justify-content: center; height: 100%; gap: 12px; padding: 20px;
+  background: var(--bg-sidebar); color: var(--text-muted);
+}
+.iframe-retry-error-text { color: var(--danger); font-size: 16px; }
+.iframe-retry-log {
+  max-width: 90%; max-height: 300px; overflow: auto;
+  background: var(--bg-content); color: var(--text-primary);
+  padding: 12px; border-radius: var(--radius); font-size: 12px;
+  font-family: monospace; white-space: pre-wrap; text-align: left; width: 100%;
+}
+.iframe-retry-log--compact { max-height: 200px; }
+.iframe-retry-actions { display: flex; gap: 8px; }
+.iframe-retry-btn {
+  padding: 4px 16px; background: transparent; border: 1px solid var(--border);
+  border-radius: var(--radius); color: var(--text-secondary); cursor: pointer;
+  font-size: 13px;
+}
+.iframe-retry-btn:hover { background: var(--bg-sidebar-hover); color: var(--text-primary); }
+.iframe-retry-frame { width: 100%; height: 100%; border: none; background: var(--bg-content); }
+
 /* === Standalone Preview Page === */
 .preview-page-shell {
   width: 100vw;
