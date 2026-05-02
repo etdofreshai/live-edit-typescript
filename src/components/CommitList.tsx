@@ -42,10 +42,10 @@ export function CommitList({
 
   return (
     <>
-      <h3 style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+      <h3 className="commit-list-header">
         <span>Commits — {selectedRepo} / {selectedBranch}</span>
         {compareInfo && compareInfo.ahead > 0 && (
-          <span style={{ fontSize: 11, background: '#89b4fa22', color: '#89b4fa', padding: '2px 8px', borderRadius: 10, fontWeight: 500 }}>
+          <span className="commit-ahead-badge">
             {compareInfo.ahead} ahead
           </span>
         )}
@@ -53,31 +53,32 @@ export function CommitList({
           <button
             onClick={onCreatePR}
             disabled={prLoading}
-            style={{ fontSize: 11, background: '#a6e3a122', color: '#a6e3a1', border: '1px solid #a6e3a144', borderRadius: 6, padding: '2px 10px', cursor: 'pointer', fontWeight: 600 }}
+            className="commit-pr-btn"
+            aria-label={`Create pull request into ${compareInfo.defaultBranch}`}
           >
             {prLoading ? '…' : `🔀 PR → ${compareInfo.defaultBranch}`}
           </button>
         )}
         {prResult && (
-          <a href={prResult.url} target="_blank" rel="noopener noreferrer"
-            style={{ fontSize: 11, color: '#a6e3a1', textDecoration: 'none' }}>
+          <a href={prResult.url} target="_blank" rel="noopener noreferrer" className="commit-pr-link">
             ✓ PR #{prResult.number}
           </a>
         )}
         {prError && (
-          <span style={{ fontSize: 11, color: '#f38ba8' }}>{prError.slice(0, 80)}</span>
+          <span className="commit-pr-error">{prError.slice(0, 80)}</span>
         )}
         <select
           value={startMode}
           onChange={e => onSaveStartMode(e.target.value as StartMode)}
-          style={{ fontSize: 11, background: '#1a1a2e', color: '#cdd6f4', border: '1px solid #3a3a5e', borderRadius: 6, padding: '2px 8px', cursor: 'pointer', marginLeft: 'auto' }}
+          className="commit-start-mode-select"
+          aria-label="Start mode"
         >
           <option value="vite">Vite</option>
           <option value="npm-dev">npm run dev</option>
         </select>
         <button
           onClick={onShowEnvModal}
-          style={{ fontSize: 11, background: 'transparent', color: '#cdd6f4', border: '1px solid #3a3a5e', borderRadius: 6, padding: '2px 10px', cursor: 'pointer', fontWeight: 600 }}
+          className="commit-env-btn"
         >
           ⚙️ Env
         </button>
@@ -89,29 +90,30 @@ export function CommitList({
               <div className="latest-label">▶ Latest</div>
               <div className="latest-desc">Track {selectedBranch} — auto-updates on new commits</div>
             </div>
-            <button className="btn-run green" onClick={onRunLatest} disabled={!!loading}>
+            <button className="btn-run green" onClick={onRunLatest} disabled={!!loading} aria-label="Run latest commit">
               {loading === 'latest' ? <span className="spinner" /> : '▶ Run'}
             </button>
           </div>
           {commits.map((c) => (
             <div key={c.sha} className="commit-item">
               <div className="commit-info">
-                <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+                <div className="commit-meta-row">
                   <div className="commit-sha">{c.sha.slice(0, 7)}</div>
                   <a
                     href={`https://github.com/${owner}/${selectedRepo}/commit/${c.sha}`}
                     target="_blank"
                     rel="noopener noreferrer"
-                    style={{ color: '#6b7280', fontSize: 10, textDecoration: 'none' }}
+                    className="commit-link"
+                    aria-label={`View commit ${c.sha.slice(0, 7)} on GitHub`}
                     title="View on GitHub"
                   >↗</a>
                 </div>
                 <div className="commit-msg">{c.commit?.message?.split('\n')[0]}</div>
                 {c.commit?.author?.date && (
-                  <div style={{ color: '#6b7280', fontSize: 11 }} title={new Date(c.commit.author.date).toLocaleString()}>{timeAgo(c.commit.author.date)}</div>
+                  <div className="commit-date" title={new Date(c.commit.author.date).toLocaleString()}>{timeAgo(c.commit.author.date)}</div>
                 )}
               </div>
-              <button className="btn-run" onClick={() => onRunCommit(c.sha)} disabled={!!loading}>
+              <button className="btn-run" onClick={() => onRunCommit(c.sha)} disabled={!!loading} aria-label={`Run commit ${c.sha.slice(0, 7)}`}>
                 {loading === c.sha ? <span className="spinner" /> : '▶ Run'}
               </button>
             </div>
