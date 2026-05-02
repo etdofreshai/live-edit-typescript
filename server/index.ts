@@ -30,6 +30,11 @@ const inflight = new Map<string, Promise<CacheEntry>>();
 const ADMIN_TOKEN = process.env.ADMIN_TOKEN;
 const requireAdmin = createRequireAdmin(ADMIN_TOKEN);
 const DEFAULT_SERVER_PORT = 3000;
+const log = {
+  info: (...args: Parameters<typeof console.log>) => console.log(...args),
+  warn: (...args: Parameters<typeof console.warn>) => console.warn(...args),
+  error: (...args: Parameters<typeof console.error>) => console.error(...args),
+};
 
 type ErrorLike = { message?: string };
 type WildcardParams = express.Request['params'] & { 0?: string };
@@ -131,7 +136,7 @@ function getWebhookCallbackUrl(): string | null {
   if (process.env.NODE_ENV === 'production') return null;
 
   if (!warnedDevWebhookUrl) {
-    console.warn('[webhook] WEBHOOK_URL is not configured; using localhost callback URL for development');
+    log.warn('[webhook] WEBHOOK_URL is not configured; using localhost callback URL for development');
     warnedDevWebhookUrl = true;
   }
 
@@ -218,7 +223,7 @@ const upload = multer({
 // Single reusable proxy instance
 const proxy = httpProxy.createProxyServer({ ws: true, changeOrigin: true });
 proxy.on('error', (err, _req, res) => {
-  console.error('Proxy error:', err.message);
+  log.error('Proxy error:', err.message);
   if (res && 'writeHead' in res) {
     (res as http.ServerResponse).writeHead(502, { 'Content-Type': 'text/plain' });
     (res as http.ServerResponse).end('Proxy error');
@@ -721,7 +726,7 @@ app.post('/api/voice', requireAdmin, upload.fields([{ name: 'audio', maxCount: 1
   }
   const audioFile = files.audio[0];
   const screenshotFile = files.screenshot?.[0];
-  console.log(`[voice] Received: audio=${audioFile.size}b, screenshot=${screenshotFile ? screenshotFile.size + 'b' : 'none'}, consoleLogs=${consoleLogs ? consoleLogs.length : 0}`);
+  log.info(`[voice] Received: audio=${audioFile.size}b, screenshot=${screenshotFile ? screenshotFile.size + 'b' : 'none'}, consoleLogs=${consoleLogs ? consoleLogs.length : 0}`);
   
   const jobId = `voice-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
   const job: VoiceJob = { id: jobId, status: 'transcribing', text: '', startedAt: Date.now() };
@@ -747,13 +752,13 @@ app.post('/api/voice', requireAdmin, upload.fields([{ name: 'audio', maxCount: 1
 
       if (!whisperRes.ok) {
         const err = await whisperRes.text();
-        console.error('Whisper API error:', err);
+        log.error('Whisper API error:', err);
         job.status = 'error'; job.error = 'Transcription failed';
         return;
       }
 
       const { text } = await whisperRes.json() as { text: string };
-      console.log('[voice] Transcribed:', text);
+      log.info('[voice] Transcribed:', text);
 
       if (!text?.trim()) {
         job.status = 'error'; job.text = '(no speech detected)';
@@ -804,14 +809,14 @@ app.post('/api/voice', requireAdmin, upload.fields([{ name: 'audio', maxCount: 1
           type: 'input_image',
           source: { type: 'base64', media_type: 'image/png', data: base64 }
         });
-        console.log(`[voice] Screenshot attached (${Math.round(base64.length / 1024)}KB base64)`);
+        log.info(`[voice] Screenshot attached (${Math.round(base64.length / 1024)}KB base64)`);
       }
       
       const input: GatewayInput[] = [
         { type: 'message', role: 'user', content: contentParts }
       ];
 
-      console.log(`[voice] Sending to gateway via /v1/responses (${input.length} input items)`);
+      log.info(`[voice] Sending to gateway via /v1/responses (${input.length} input items)`);
       const gatewayRes = await fetch(`${OPENCLAW_GATEWAY_URL}/v1/responses`, {
         method: 'POST',
         headers: {
@@ -829,7 +834,7 @@ app.post('/api/voice', requireAdmin, upload.fields([{ name: 'audio', maxCount: 1
       try { responseBody = toGatewayResponseBody(await gatewayRes.json()); } catch {}
 
       if (!gatewayRes.ok) {
-        console.error('OpenClaw gateway error:', responseBody);
+        log.error('OpenClaw gateway error:', responseBody);
         job.status = 'error'; job.error = 'Gateway send failed';
         // Mark transcript as error
         const histEntry = transcriptHistory.find(e => e.id === transcriptId);
@@ -861,10 +866,10 @@ app.post('/api/voice', requireAdmin, upload.fields([{ name: 'audio', maxCount: 1
         if (responseText) histEntry.response = responseText;
       }
 
-      console.log('[voice] Sent to OpenClaw:', text.slice(0, 50));
+      log.info('[voice] Sent to OpenClaw:', text.slice(0, 50));
       job.status = 'sent';
     } catch (e: unknown) {
-      console.error('[voice] Error:', e);
+      log.error('[voice] Error:', e);
       job.status = 'error'; job.error = errorMessage(e);
       // Also mark transcript entry as error if it exists
       const histEntry = transcriptHistory.find(e => e.status === 'pending');
@@ -1005,10 +1010,10 @@ server.on('upgrade', (req, socket, head) => {
 const shutdown = (signal: NodeJS.Signals) => {
   if (shuttingDown) return;
   shuttingDown = true;
-  console.log(`[shutdown] ${signal} received; closing API server and target processes`);
+  log.info(`[shutdown] ${signal} received; closing API server and target processes`);
 
   const forceExit = setTimeout(() => {
-    console.error('[shutdown] timed out; exiting');
+    log.error('[shutdown] timed out; exiting');
     process.exit(0);
   }, 8000);
   forceExit.unref();
@@ -1026,7 +1031,7 @@ process.on('SIGINT', shutdown);
 export function startServer() {
   const serverPort = getServerPort();
   server.listen(serverPort, () => {
-    console.log(`API server on :${serverPort}`);
+    log.info(`API server on :${serverPort}`);
 
     // Poll latest entries every 10 seconds
     setInterval(async () => {
@@ -1034,11 +1039,11 @@ export function startServer() {
         try {
           const headSha = await getBranchHead(entry.owner, entry.repo, entry.branch!);
           if (headSha !== entry.sha) {
-            console.log(`[latest] ${entry.repo}/${entry.branch}: ${entry.sha.slice(0, 7)} → ${headSha.slice(0, 7)}`);
+            log.info(`[latest] ${entry.repo}/${entry.branch}: ${entry.sha.slice(0, 7)} → ${headSha.slice(0, 7)}`);
             await refreshLatestEntry(entry, headSha);
           }
         } catch (e: unknown) {
-          console.error(`[latest] poll error for ${entry.repo}/${entry.branch}:`, errorMessage(e));
+          log.error(`[latest] poll error for ${entry.repo}/${entry.branch}:`, errorMessage(e));
         }
       }
     }, 10_000);
