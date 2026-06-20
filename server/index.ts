@@ -6,7 +6,7 @@ import fs from 'fs';
 import pathModule from 'path';
 import multer from 'multer';
 // Using native FormData + Blob (Node 22)
-import { listRepos, listBranches, listCommits, getBranchHead, getCommit, createBranch, getDefaultBranch, compareBranches, createPullRequest, OWNER } from './github.js';
+import { listRepos, listBranches, listCommits, getBranchHead, getCommit, createBranch, getDefaultBranch, compareBranches, createPullRequest } from './github.js';
 import { getEntry, addEntry, evictIfNeeded, allocatePort, removeEntry, listEntries, makeId, getEntryByPort, getLatestEntries, updateEntry, getEntryById } from './cache-manager.js';
 import { cloneAndStart, getTargetDir, pullLatest, getServerLog } from './runner.js';
 import { webhookRouter, registerWebhook, unregisterWebhook } from './webhook.js';
@@ -22,7 +22,8 @@ const gitInfo = (() => {
     const sha = execSync('git rev-parse HEAD', { encoding: 'utf8' }).trim();
     const branch = execSync('git rev-parse --abbrev-ref HEAD', { encoding: 'utf8' }).trim();
     const date = execSync('git log -1 --format=%aI', { encoding: 'utf8' }).trim();
-    return { owner: OWNER, repo: 'live-edit-typescript', branch, sha, date };
+    // gitInfo describes THIS server's own repo — fixed self owner, not coupled to GITHUB_OWNERS.
+    return { owner: 'etdofreshai', repo: 'live-edit-typescript', branch, sha, date };
   } catch { return null; }
 })();
 app.get('/api/info', (_req, res) => res.json(gitInfo));
@@ -52,20 +53,20 @@ app.get('/api/repos', async (_req, res) => {
   }
 });
 
-app.get('/api/repos/:repo/branches', async (req, res) => {
+app.get('/api/repos/:owner/:repo/branches', async (req, res) => {
   try {
-    res.json(await listBranches(req.params.repo));
+    res.json(await listBranches(req.params.owner, req.params.repo));
   } catch (e: any) {
     res.status(500).json({ error: e.message });
   }
 });
 
-app.post('/api/repos/:repo/branches', async (req, res) => {
+app.post('/api/repos/:owner/:repo/branches', async (req, res) => {
   const { name, from } = req.body;
   if (!name || !from) return res.status(400).json({ error: 'name and from required' });
   try {
-    const sha = await getBranchHead(req.params.repo, from);
-    const ref = await createBranch(req.params.repo, name, sha);
+    const sha = await getBranchHead(req.params.owner, req.params.repo, from);
+    const ref = await createBranch(req.params.owner, req.params.repo, name, sha);
     res.json({ name, sha, ref: ref.ref });
   } catch (e: any) {
     const status = e.message.includes('already exists') ? 409 : 500;
@@ -73,33 +74,33 @@ app.post('/api/repos/:repo/branches', async (req, res) => {
   }
 });
 
-app.get('/api/repos/:repo/branches/:branch/compare', async (req, res) => {
+app.get('/api/repos/:owner/:repo/branches/:branch/compare', async (req, res) => {
   try {
-    const defaultBranch = await getDefaultBranch(req.params.repo);
+    const defaultBranch = await getDefaultBranch(req.params.owner, req.params.repo);
     if (req.params.branch === defaultBranch) {
       return res.json({ ahead: 0, behind: 0, defaultBranch });
     }
-    const cmp = await compareBranches(req.params.repo, defaultBranch, req.params.branch);
+    const cmp = await compareBranches(req.params.owner, req.params.repo, defaultBranch, req.params.branch);
     res.json({ ahead: cmp.ahead_by, behind: cmp.behind_by, defaultBranch });
   } catch (e: any) {
     res.status(500).json({ error: e.message });
   }
 });
 
-app.post('/api/repos/:repo/pulls', async (req, res) => {
+app.post('/api/repos/:owner/:repo/pulls', async (req, res) => {
   const { head, base, title, body } = req.body;
   if (!head || !base || !title) return res.status(400).json({ error: 'head, base, and title required' });
   try {
-    const pr = await createPullRequest(req.params.repo, title, head, base, body);
+    const pr = await createPullRequest(req.params.owner, req.params.repo, title, head, base, body);
     res.json({ url: pr.html_url, number: pr.number });
   } catch (e: any) {
     res.status(500).json({ error: e.message });
   }
 });
 
-app.get('/api/repos/:repo/branches/:branch/commits', async (req, res) => {
+app.get('/api/repos/:owner/:repo/branches/:branch/commits', async (req, res) => {
   try {
-    res.json(await listCommits(req.params.repo, req.params.branch));
+    res.json(await listCommits(req.params.owner, req.params.repo, req.params.branch));
   } catch (e: any) {
     res.status(500).json({ error: e.message });
   }
@@ -110,10 +111,10 @@ app.get('/api/cache', (_req, res) => {
 });
 
 app.post('/api/run', async (req, res) => {
-  const { repo, sha, envVars, startMode } = req.body;
-  if (!repo || !sha) return res.status(400).json({ error: 'repo and sha required' });
+  const { owner, repo, sha, envVars, startMode } = req.body;
+  if (!owner || !repo || !sha) return res.status(400).json({ error: 'owner, repo and sha required' });
 
-  const existing = getEntry(repo, sha);
+  const existing = getEntry(owner, repo, sha);
   if (existing) return res.json(existing);
 
   await evictIfNeeded();
@@ -123,11 +124,12 @@ app.post('/api/run', async (req, res) => {
 
   try {
     const [{ dir, pid, type }, commitInfo] = await Promise.all([
-      cloneAndStart(repo, sha, port, { envVars, startMode }),
-      getCommit(repo, sha).catch(() => ({ message: '', date: '' })),
+      cloneAndStart(owner, repo, sha, port, { envVars, startMode }),
+      getCommit(owner, repo, sha).catch(() => ({ message: '', date: '' })),
     ]);
     const entry = {
-      id: makeId(repo, sha),
+      id: makeId(owner, repo, sha),
+      owner,
       repo,
       sha,
       port: type === 'static' ? 0 : port,
@@ -146,14 +148,14 @@ app.post('/api/run', async (req, res) => {
 });
 
 app.post('/api/run-latest', async (req, res) => {
-  const { repo, branch, envVars, startMode } = req.body;
-  if (!repo || !branch) return res.status(400).json({ error: 'repo and branch required' });
+  const { owner, repo, branch, envVars, startMode } = req.body;
+  if (!owner || !repo || !branch) return res.status(400).json({ error: 'owner, repo and branch required' });
 
   try {
-    const sha = await getBranchHead(repo, branch);
+    const sha = await getBranchHead(owner, repo, branch);
 
-    // Check if we already have a latest entry for this repo+branch
-    const existing = getLatestEntries().find(e => e.repo === repo && e.branch === branch);
+    // Check if we already have a latest entry for this owner+repo+branch
+    const existing = getLatestEntries().find(e => e.owner === owner && e.repo === repo && e.branch === branch);
     if (existing) {
       existing.lastAccessed = Date.now();
       return res.json(existing);
@@ -164,12 +166,12 @@ app.post('/api/run-latest', async (req, res) => {
     if (!port) return res.status(503).json({ error: 'No ports available' });
 
     const [{ dir, pid, type }, commitInfo] = await Promise.all([
-      cloneAndStart(repo, sha, port, { branch, isLatest: true, envVars, startMode }),
-      getCommit(repo, sha).catch(() => ({ message: '', date: '' })),
+      cloneAndStart(owner, repo, sha, port, { branch, isLatest: true, envVars, startMode }),
+      getCommit(owner, repo, sha).catch(() => ({ message: '', date: '' })),
     ]);
     const entry = {
-      id: makeId(repo, sha),
-      repo, sha, port, dir, pid,
+      id: makeId(owner, repo, sha),
+      owner, repo, sha, port, dir, pid,
       lastAccessed: Date.now(),
       branch,
       isLatest: true,
@@ -180,7 +182,7 @@ app.post('/api/run-latest', async (req, res) => {
     addEntry(entry);
 
     // Auto-register webhook for this repo
-    registerWebhook(repo, req.get('host'));
+    registerWebhook(owner, repo, req.get('host'));
 
     res.json(entry);
   } catch (e: any) {
@@ -199,8 +201,8 @@ app.delete('/api/cache/:id', async (req, res) => {
   const entry = getEntryById(req.params.id);
   const ok = await removeEntry(req.params.id);
   // Clean up webhook if this was a latest entry
-  if (ok && entry?.isLatest && entry.repo) {
-    unregisterWebhook(entry.repo).catch(() => {});
+  if (ok && entry?.isLatest && entry.owner && entry.repo) {
+    unregisterWebhook(entry.owner, entry.repo).catch(() => {});
   }
   res.json({ ok });
 });
@@ -321,6 +323,15 @@ app.post('/api/voice', upload.fields([{ name: 'audio', maxCount: 1 }, { name: 's
   if (!OPENAI_API_KEY) return res.status(500).json({ error: 'OPENAI_API_KEY not configured' });
 
   const context = req.body.context ? JSON.parse(req.body.context) : undefined;
+  // Resolve the real owner from the active cache entry matching this context
+  // (don't fall back to a hardcoded owner literal).
+  const activeEntry = context?.repo
+    ? listEntries().find(e =>
+        e.repo === context.repo &&
+        (context.sha ? e.sha === context.sha : true) &&
+        (context.branch ? e.branch === context.branch : true) &&
+        (context.owner ? e.owner === context.owner : true))
+    : undefined;
   const consoleLogs = req.body.consoleLogs ? JSON.parse(req.body.consoleLogs) : undefined;
   const audioFile = files.audio[0];
   const screenshotFile = files.screenshot?.[0];
@@ -389,7 +400,8 @@ app.post('/api/voice', upload.fields([{ name: 'audio', maxCount: 1 }, { name: 's
       // Build message text
       let messageText = text;
       if (context?.repo) {
-        messageText = `[Live Edit: ${context.owner || 'etdofreshai'}/${context.repo}${context.branch ? ` @ ${context.branch}` : ''}${context.sha ? ` (${context.sha.slice(0, 7)})` : ''}]\n[If you make changes, commit and push to the repo.]\n\n${text}`;
+        const ownerLabel = context.owner || activeEntry?.owner || '';
+        messageText = `[Live Edit: ${ownerLabel ? `${ownerLabel}/` : ''}${context.repo}${context.branch ? ` @ ${context.branch}` : ''}${context.sha ? ` (${context.sha.slice(0, 7)})` : ''}]\n[If you make changes, commit and push to the repo.]\n\n${text}`;
       }
       if (consoleLogs && consoleLogs.length > 0) {
         messageText += `\n\n**Console logs (last ${consoleLogs.length} entries):**\n${consoleLogs.join('\n')}`;
@@ -596,14 +608,14 @@ server.listen(3000, () => {
   setInterval(async () => {
     for (const entry of getLatestEntries()) {
       try {
-        const headSha = await getBranchHead(entry.repo, entry.branch!);
+        const headSha = await getBranchHead(entry.owner, entry.repo, entry.branch!);
         if (headSha !== entry.sha) {
-          console.log(`[latest] ${entry.repo}/${entry.branch}: ${entry.sha.slice(0, 7)} → ${headSha.slice(0, 7)}`);
+          console.log(`[latest] ${entry.owner}/${entry.repo}/${entry.branch}: ${entry.sha.slice(0, 7)} → ${headSha.slice(0, 7)}`);
           await pullLatest(entry, headSha);
           updateEntry(entry.id, { sha: headSha });
         }
       } catch (e: any) {
-        console.error(`[latest] poll error for ${entry.repo}/${entry.branch}:`, e.message);
+        console.error(`[latest] poll error for ${entry.owner}/${entry.repo}/${entry.branch}:`, e.message);
       }
     }
   }, 10_000);

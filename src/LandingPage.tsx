@@ -8,6 +8,7 @@ interface Repo {
   updated_at: string;
   html_url: string;
   owner: {
+    login: string;
     avatar_url: string;
   };
 }
@@ -43,6 +44,9 @@ export default function LandingPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [gitInfo, setGitInfo] = useState<GitInfo | null>(null);
+
+  // Distinct owners present in the loaded repo list, in first-seen order
+  const owners = Array.from(new Set(repos.map(r => r.owner.login)));
 
   useEffect(() => {
     api('/api/info').then(setGitInfo).catch(() => {});
@@ -87,15 +91,25 @@ export default function LandingPage() {
           textAlign: 'center',
           marginBottom: 40,
         }}>
-          Browse and edit Vite + TypeScript repos from{' '}
-          <a
-            href="https://github.com/etdofreshai"
-            target="_blank"
-            rel="noopener noreferrer"
-            style={{ color: '#89b4fa', textDecoration: 'none' }}
-          >
-            etdofreshai
-          </a>
+          Browse and edit Vite + TypeScript repos
+          {owners.length > 0 && (
+            <>
+              {' from '}
+              {owners.map((o, i) => (
+                <React.Fragment key={o}>
+                  {i > 0 && (i === owners.length - 1 ? ' and ' : ', ')}
+                  <a
+                    href={`https://github.com/${o}`}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    style={{ color: '#89b4fa', textDecoration: 'none' }}
+                  >
+                    {o}
+                  </a>
+                </React.Fragment>
+              ))}
+            </>
+          )}
         </p>
 
         {error && (
@@ -119,8 +133,8 @@ export default function LandingPage() {
           <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
             {repos.map(repo => (
               <Link
-                key={repo.name}
-                to={`/edit/etdofreshai/${repo.name}`}
+                key={`${repo.owner.login}/${repo.name}`}
+                to={`/edit/${repo.owner.login}/${repo.name}`}
                 style={{
                   display: 'block',
                   background: '#1a1a2e',
@@ -157,8 +171,21 @@ export default function LandingPage() {
                       fontWeight: 600,
                       margin: 0,
                       color: '#cdd6f4',
+                      display: 'flex',
+                      alignItems: 'baseline',
+                      gap: 8,
                     }}>
                       {repo.name}
+                      <span style={{
+                        fontSize: 12,
+                        fontWeight: 500,
+                        color: '#89b4fa',
+                        background: '#89b4fa22',
+                        padding: '2px 8px',
+                        borderRadius: 10,
+                      }}>
+                        {repo.owner.login}
+                      </span>
                     </h3>
                   </div>
                   <div style={{
@@ -191,7 +218,7 @@ export default function LandingPage() {
                   alignItems: 'center',
                 }}>
                   <Link
-                    to={`/etdofreshai/${repo.name}/`}
+                    to={`/${repo.owner.login}/${repo.name}/`}
                     onClick={e => e.stopPropagation()}
                     style={{
                       fontSize: 13,
@@ -209,7 +236,7 @@ export default function LandingPage() {
                     ▶ Run
                   </Link>
                   <Link
-                    to={`/edit/etdofreshai/${repo.name}/main/latest`}
+                    to={`/edit/${repo.owner.login}/${repo.name}/main/latest`}
                     onClick={e => e.stopPropagation()}
                     style={{
                       fontSize: 13,

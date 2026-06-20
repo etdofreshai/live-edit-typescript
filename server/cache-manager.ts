@@ -2,6 +2,7 @@ import { stopServer, removeFiles } from './runner.js';
 
 export interface CacheEntry {
   id: string;
+  owner: string;
   repo: string;
   sha: string;
   port: number;
@@ -21,8 +22,8 @@ const PORT_MAX = 5189;
 
 const cache = new Map<string, CacheEntry>();
 
-function makeId(repo: string, sha: string) {
-  return `${repo}-${sha.slice(0, 7)}`;
+function makeId(owner: string, repo: string, sha: string) {
+  return `${owner}-${repo}-${sha.slice(0, 7)}`;
 }
 
 function usedPorts(): Set<number> {
@@ -39,8 +40,8 @@ export function allocatePort(): number | null {
   return null;
 }
 
-export function getEntry(repo: string, sha: string): CacheEntry | undefined {
-  const id = makeId(repo, sha);
+export function getEntry(owner: string, repo: string, sha: string): CacheEntry | undefined {
+  const id = makeId(owner, repo, sha);
   const e = cache.get(id);
   if (e) e.lastAccessed = Date.now();
   return e;

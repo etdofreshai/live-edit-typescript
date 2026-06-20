@@ -4,6 +4,7 @@ import './styles.css';
 
 interface CacheEntry {
   id: string;
+  owner: string;
   repo: string;
   sha: string;
   port: number;
@@ -221,6 +222,7 @@ export default function PreviewPage() {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
+              owner,
               repo,
               branch: targetBranch,
               envVars: {},
@@ -240,7 +242,7 @@ export default function PreviewPage() {
           // Specific commit
           const cache = await api('/api/cache');
           const existing = cache.find((e: CacheEntry) =>
-            e.repo === repo && e.sha === commit
+            e.owner === owner && e.repo === repo && e.sha === commit
           );
 
           if (existing) {
@@ -253,6 +255,7 @@ export default function PreviewPage() {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
+              owner,
               repo,
               sha: commit,
               envVars: {},

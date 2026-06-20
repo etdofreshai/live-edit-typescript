@@ -2,15 +2,15 @@ import { execSync, spawn } from 'child_process';
 import { existsSync, rmSync, readFileSync, openSync, closeSync, writeFileSync } from 'fs';
 import path from 'path';
 import type { CacheEntry } from './cache-manager.js';
-import { OWNER } from './github.js';
 
 const TARGETS_DIR = path.resolve(process.cwd(), 'targets');
 
-export function getTargetDir(repo: string, sha: string): string {
-  return path.join(TARGETS_DIR, `${repo}-${sha.slice(0, 7)}`);
+export function getTargetDir(owner: string, repo: string, sha: string): string {
+  return path.join(TARGETS_DIR, `${owner}-${repo}-${sha.slice(0, 7)}`);
 }
 
 export async function cloneAndStart(
+  owner: string,
   repo: string,
   sha: string,
   port: number,
@@ -21,10 +21,10 @@ export async function cloneAndStart(
     startMode?: 'vite' | 'npm-dev';
   }
 ): Promise<{ dir: string; pid: number; type: 'vite' | 'static' }> {
-  const dir = getTargetDir(repo, sha);
+  const dir = getTargetDir(owner, repo, sha);
 
   if (!existsSync(dir)) {
-    const cloneUrl = `https://github.com/${OWNER}/${repo}.git`;
+    const cloneUrl = `https://github.com/${owner}/${repo}.git`;
     if (opts?.isLatest) {
       execSync(`git clone ${cloneUrl} ${dir}`, { stdio: 'pipe' });
       execSync(`git checkout ${sha}`, { cwd: dir, stdio: 'pipe' });
